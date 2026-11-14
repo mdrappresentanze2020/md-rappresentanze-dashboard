@@ -10,10 +10,13 @@ from sqlalchemy import text
 
 st.set_page_config(page_title="MD Rappresentanze | Clienti", page_icon="📊", layout="wide")
 st.markdown("""<style>
-.stApp{background:#f7f7f7;color:#202124}.block-container{padding-top:1rem;max-width:1500px}
+.stApp{background:#f7f7f7;color:#202124}.block-container{padding-top:3.6rem;max-width:1500px}
 [data-testid="stHeader"]{background:#087dac}
 [data-testid="stSidebar"]{background:#f3f4f6!important;border-right:1px solid #d6dbe1}
 [data-testid="stSidebar"] *{color:#1f2937!important}
+[data-testid="stSidebar"] button{background:#2f2f2f!important;border:1px solid #2f2f2f!important}
+[data-testid="stSidebar"] button p,[data-testid="stSidebar"] button span,[data-testid="stSidebar"] button div{color:#ffffff!important;font-weight:700!important}
+[data-testid="stSidebar"] button:hover{background:#087dac!important;border-color:#087dac!important}
 .brandline{background:#087dac;color:#fff;padding:12px 18px;border-radius:4px}
 .titleband{background:#dff27d;text-align:center;font-size:28px;font-weight:900;font-style:italic;padding:5px;margin:8px 0 16px}
 .months{display:grid;grid-template-columns:repeat(12,1fr);gap:2px}
