@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import io
+import os
 import re
 
 import pandas as pd
@@ -19,6 +20,7 @@ st.markdown(
     <style>
     .stApp {background:#f7f7f7; color:#202124;}
     .block-container {padding-top:1rem; max-width:1500px;}
+    .top-white-space{height:72px;background:#ffffff;width:100%;margin:0 0 6px 0;}
     [data-testid="stHeader"] {background:#087dac;}
     [data-testid="stSidebar"] {background:#f3f4f6!important; border-right:1px solid #d6dbe1;}
     [data-testid="stSidebar"] * {color:#1f2937!important;}
@@ -57,23 +59,188 @@ def password_hash(password):
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
+def secure_password(password, salt=None):
+    salt = salt or os.urandom(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, 250_000
+    )
+    return salt.hex(), digest.hex()
+
+
+def verify_secure_password(password, salt_hex, digest_hex):
+    try:
+        salt = bytes.fromhex(salt_hex)
+        _, calculated = secure_password(password, salt)
+        return hmac.compare_digest(calculated, digest_hex)
+    except (TypeError, ValueError):
+        return False
+
+
 def configured_users():
     raw_users = st.secrets.get("users", {})
     return {username: dict(values) for username, values in raw_users.items()}
 
 
+def get_database():
+    return st.connection("postgresql", type="sql")
+
+
+def ensure_users_table():
+    query = text("""
+        CREATE TABLE IF NOT EXISTS app_users (
+            username TEXT PRIMARY KEY,
+            password_salt TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'cliente',
+            customer_code TEXT NOT NULL DEFAULT '',
+            customer_name TEXT NOT NULL DEFAULT '',
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    with get_database().session as session:
+        session.execute(query)
+        session.commit()
+
+
 def authenticate(username, password):
-    user = configured_users().get(username.strip())
-    if not user:
+    username = username.strip().lower()
+    ensure_users_table()
+    query = text("""
+        SELECT username, password_salt, password_hash, role,
+               customer_code, customer_name, active
+        FROM app_users
+        WHERE lower(username) = :username
+    """)
+    with get_database().session as session:
+        row = session.execute(query, {"username": username}).mappings().first()
+
+    if row:
+        if not row["active"]:
+            return None
+        if verify_secure_password(password, row["password_salt"], row["password_hash"]):
+            return {
+                "role": row["role"],
+                "customer_code": row["customer_code"],
+                "customer_name": row["customer_name"],
+            }
         return None
 
-    stored_hash = str(user.get("password_sha256", ""))
-    calculated_hash = password_hash(password)
-
-    if not hmac.compare_digest(calculated_hash, stored_hash):
+    # Compatibilità iniziale con gli utenti già salvati nei Secrets.
+    secret_user = configured_users().get(username)
+    if not secret_user:
         return None
+    stored_hash = str(secret_user.get("password_sha256", ""))
+    if not hmac.compare_digest(password_hash(password), stored_hash):
+        return None
+    return secret_user
 
-    return user
+
+def create_or_update_user(username, password, role, customer_code, customer_name):
+    ensure_users_table()
+    username = username.strip().lower()
+    if not re.fullmatch(r"[a-z0-9._-]{3,40}", username):
+        raise ValueError("Lo username deve avere 3-40 caratteri: lettere, numeri, punto, trattino o underscore.")
+    if len(password) < 10:
+        raise ValueError("La password deve contenere almeno 10 caratteri.")
+    if role == "cliente" and not customer_code.strip():
+        raise ValueError("Per un cliente il codice cliente è obbligatorio.")
+    salt, digest = secure_password(password)
+    query = text("""
+        INSERT INTO app_users (
+            username, password_salt, password_hash, role,
+            customer_code, customer_name, active, updated_at
+        ) VALUES (
+            :username, :salt, :digest, :role,
+            :customer_code, :customer_name, TRUE, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (username) DO UPDATE SET
+            password_salt = EXCLUDED.password_salt,
+            password_hash = EXCLUDED.password_hash,
+            role = EXCLUDED.role,
+            customer_code = EXCLUDED.customer_code,
+            customer_name = EXCLUDED.customer_name,
+            active = TRUE,
+            updated_at = CURRENT_TIMESTAMP
+    """)
+    params = {
+        "username": username,
+        "salt": salt,
+        "digest": digest,
+        "role": role,
+        "customer_code": customer_code.strip(),
+        "customer_name": customer_name.strip(),
+    }
+    with get_database().session as session:
+        session.execute(query, params)
+        session.commit()
+
+
+def set_user_active(username, active):
+    ensure_users_table()
+    query = text("""
+        UPDATE app_users SET active = :active, updated_at = CURRENT_TIMESTAMP
+        WHERE username = :username
+    """)
+    with get_database().session as session:
+        session.execute(query, {"active": active, "username": username})
+        session.commit()
+
+
+def get_users_dataframe():
+    ensure_users_table()
+    query = text("""
+        SELECT username, role, customer_code, customer_name, active, updated_at
+        FROM app_users ORDER BY username
+    """)
+    with get_database().session as session:
+        rows = session.execute(query).mappings().all()
+    return pd.DataFrame(rows)
+
+
+def show_user_management():
+    st.subheader("Gestione clienti e utenti")
+    st.caption("Crea un nuovo accesso oppure sovrascrivi un utente esistente usando lo stesso username.")
+
+    with st.form("user_management_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        username = col1.text_input("Username")
+        password = col2.text_input("Password", type="password")
+        col3, col4 = st.columns(2)
+        role = col3.selectbox("Ruolo", ["cliente", "admin"])
+        customer_code = col4.text_input("Codice cliente", help="Esempio: M7003635")
+        customer_name = st.text_input("Ragione sociale", help="Esempio: ERRECLIMA SRL")
+        submitted = st.form_submit_button("Salva utente", type="primary")
+
+        if submitted:
+            try:
+                create_or_update_user(
+                    username, password, role, customer_code, customer_name
+                )
+                st.success(f"Utente {username.strip().lower()} salvato correttamente.")
+            except Exception as error:
+                st.error(str(error))
+
+    users_df = get_users_dataframe()
+    if users_df.empty:
+        st.info("Non ci sono ancora utenti creati nel database.")
+    else:
+        st.dataframe(users_df, use_container_width=True, hide_index=True)
+        usernames = users_df["username"].tolist()
+        selected = st.selectbox("Utente da attivare/disattivare", usernames)
+        col1, col2 = st.columns(2)
+        if col1.button("Attiva utente"):
+            set_user_active(selected, True)
+            st.success(f"Utente {selected} attivato.")
+            st.rerun()
+        if col2.button("Disattiva utente"):
+            if selected == st.session_state.user.get("username"):
+                st.error("Non puoi disattivare l'utente con cui sei connesso.")
+            else:
+                set_user_active(selected, False)
+                st.success(f"Utente {selected} disattivato.")
+                st.rerun()
 
 
 def get_database():
@@ -325,6 +492,7 @@ def show_dashboard(data, customer_code, customer_name):
     st.dataframe(detail, use_container_width=True, hide_index=True)
 
 
+st.markdown('<div class="top-white-space"></div>', unsafe_allow_html=True)
 st.session_state.setdefault("user", None)
 
 if not st.session_state.user:
@@ -354,9 +522,13 @@ with st.sidebar:
         st.rerun()
 
     if current_user.get("role") == "admin":
-        page = st.radio("Sezione", ["Dashboard", "Aggiorna dati"])
+        page = st.radio("Sezione", ["Dashboard", "Aggiorna dati", "Gestione utenti"])
     else:
         page = "Dashboard"
+
+if page == "Gestione utenti":
+    show_user_management()
+    st.stop()
 
 if page == "Aggiorna dati":
     uploaded_file = st.file_uploader(
