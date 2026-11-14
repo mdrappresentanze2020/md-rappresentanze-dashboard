@@ -178,9 +178,9 @@ def dashboard(data, code, name):
         "Da Spedire": [total[f"Da Spedire Q{i}"] for i in range(1,5)]
     })
     fig_q = go.Figure()
-    fig_q.add_bar(name="Spedito", x=qdata["Trimestre"], y=qdata["Spedito"], marker_color="#087dac")
-    fig_q.add_bar(name="Da Spedire", x=qdata["Trimestre"], y=qdata["Da Spedire"], marker_color="#dff27d")
-    fig_q.update_layout(barmode="stack", height=390, paper_bgcolor="white", yaxis_title="Euro", legend_orientation="h")
+    fig_q.add_bar(name="Spedito", x=qdata["Trimestre"], y=qdata["Spedito"], marker_color="#4F8FC5", text=[euro(v) for v in qdata["Spedito"]], textposition="inside", textfont=dict(color="white",size=12))
+    fig_q.add_bar(name="Da Spedire", x=qdata["Trimestre"], y=qdata["Da Spedire"], marker_color="#D6E86B", text=[euro(v) if v else "" for v in qdata["Da Spedire"]], textposition="inside", textfont=dict(color="#202124",size=11))
+    fig_q.update_layout(barmode="stack", height=320, paper_bgcolor="white", plot_bgcolor="white", yaxis_title="Euro", legend_orientation="h", margin=dict(l=20,r=15,t=20,b=20), font=dict(color="#202124"), xaxis=dict(tickfont=dict(color="#202124"),showgrid=False), yaxis=dict(tickfont=dict(color="#4b5563"),gridcolor="#e5e7eb"))
     st.plotly_chart(fig_q, use_container_width=True)
 
     left,right = st.columns(2)
@@ -188,14 +188,14 @@ def dashboard(data, code, name):
         st.subheader("Totale per catalogo")
         fig_cat = go.Figure(go.Pie(labels=catalogs["Catalogo"], values=catalogs["Totale Complessivo"], hole=.48,
                                    marker_colors=["#168af4","#163eae","#ec6b2d","#760080","#dd469d"], textinfo="label+percent"))
-        fig_cat.update_layout(height=390, paper_bgcolor="white")
+        fig_cat.update_layout(height=330, paper_bgcolor="white", plot_bgcolor="white", font=dict(color="#202124"), margin=dict(l=10,r=10,t=20,b=10))
         st.plotly_chart(fig_cat, use_container_width=True)
     with right:
         st.subheader("Spedito vs Da Spedire per catalogo")
         fig_cat2 = go.Figure()
-        fig_cat2.add_bar(name="Spedito", x=catalogs["Catalogo"], y=catalogs["Spedito Totale"], marker_color="#087dac")
-        fig_cat2.add_bar(name="Da Spedire", x=catalogs["Catalogo"], y=catalogs["Da Spedire Totale"], marker_color="#dff27d")
-        fig_cat2.update_layout(barmode="stack",height=390,paper_bgcolor="white",legend_orientation="h",yaxis_title="Euro")
+        fig_cat2.add_bar(name="Spedito", x=catalogs["Catalogo"], y=catalogs["Spedito Totale"], marker_color="#4F8FC5", text=[euro(v) for v in catalogs["Spedito Totale"]], textposition="inside", textfont=dict(color="white",size=11))
+        fig_cat2.add_bar(name="Da Spedire", x=catalogs["Catalogo"], y=catalogs["Da Spedire Totale"], marker_color="#D6E86B", text=[euro(v) if v else "" for v in catalogs["Da Spedire Totale"]], textposition="inside", textfont=dict(color="#202124",size=10))
+        fig_cat2.update_layout(barmode="stack",height=330,paper_bgcolor="white",plot_bgcolor="white",legend_orientation="h",yaxis_title="Euro",font=dict(color="#202124"),margin=dict(l=20,r=10,t=20,b=20),xaxis=dict(tickfont=dict(color="#202124"),showgrid=False),yaxis=dict(tickfont=dict(color="#4b5563"),gridcolor="#e5e7eb"))
         st.plotly_chart(fig_cat2,use_container_width=True)
 
     st.subheader("Riepilogo cataloghi")
@@ -251,9 +251,9 @@ def admin_dashboard():
     if not loaded.empty:
         st.subheader("Confronto clienti")
         fig = go.Figure()
-        fig.add_bar(name="Spedito", x=loaded["Cliente"], y=loaded["Spedito"], marker_color="#087dac")
-        fig.add_bar(name="Da Spedire", x=loaded["Cliente"], y=loaded["Da Spedire"], marker_color="#dff27d")
-        fig.update_layout(barmode="stack", height=420, paper_bgcolor="white", legend_orientation="h", yaxis_title="Euro")
+        fig.add_bar(name="Spedito", x=loaded["Cliente"], y=loaded["Spedito"], marker_color="#4F8FC5", text=[euro(v) for v in loaded["Spedito"]], textposition="inside", textfont=dict(color="white",size=12))
+        fig.add_bar(name="Da Spedire", x=loaded["Cliente"], y=loaded["Da Spedire"], marker_color="#D6E86B", text=[euro(v) if v else "" for v in loaded["Da Spedire"]], textposition="inside", textfont=dict(color="#202124",size=11))
+        fig.update_layout(barmode="stack", height=320, paper_bgcolor="white", plot_bgcolor="white", legend_orientation="h", yaxis_title="Euro", font=dict(color="#202124"), margin=dict(l=20,r=15,t=20,b=55), xaxis=dict(tickfont=dict(color="#202124",size=11),showgrid=False), yaxis=dict(tickfont=dict(color="#4b5563"),gridcolor="#e5e7eb"))
         st.plotly_chart(fig, use_container_width=True)
 
         if catalog_rows:
@@ -261,7 +261,7 @@ def admin_dashboard():
             st.subheader("Ripartizione complessiva per catalogo")
             fig_cat = go.Figure(go.Pie(labels=cat["Catalogo"], values=cat["Totale"], hole=.48,
                                        marker_colors=["#168af4","#163eae","#ec6b2d","#760080","#dd469d"], textinfo="label+percent"))
-            fig_cat.update_layout(height=390, paper_bgcolor="white")
+            fig_cat.update_layout(height=320, paper_bgcolor="white", plot_bgcolor="white", font=dict(color="#202124"), margin=dict(l=10,r=10,t=20,b=10))
             st.plotly_chart(fig_cat, use_container_width=True)
 
     st.subheader("Situazione clienti")
