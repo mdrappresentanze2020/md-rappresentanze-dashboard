@@ -24,6 +24,11 @@ st.markdown("""<style>
 .stMetric{background:#fff!important;border:1px solid #d7dde5;border-radius:14px;padding:14px}
 [data-testid="stMetricLabel"] p{color:#3f4854!important;font-weight:700}
 [data-testid="stMetricValue"]{color:#4F8FC5!important}
+/* Login: etichette e testo digitato sempre neri */
+[data-testid="stForm"] label p{color:#000000!important;font-weight:700!important}
+[data-testid="stForm"] input{color:#000000!important;background:#ffffff!important;-webkit-text-fill-color:#000000!important}
+[data-testid="stForm"] input::placeholder{color:#6b7280!important;opacity:1!important}
+[data-testid="stForm"] [data-testid="stTextInput"] div{color:#000000!important}
 .login-logo{text-align:center;margin-bottom:12px}.client-card{background:#fff;border:1px solid #d7dde5;border-left:5px solid #087dac;border-radius:9px;padding:14px;margin-bottom:10px}
 </style>""", unsafe_allow_html=True)
 
