@@ -209,6 +209,83 @@ def dashboard(data, code, name):
     for col in family_view.columns[1:]: family_view[col] = family_view[col].map(euro)
     st.dataframe(family_view, use_container_width=True, hide_index=True)
 
+def admin_dashboard():
+    st.title("Cruscotto generale MD Rappresentanze")
+    status = dataset_status()
+    rows = []
+    catalog_rows = []
+    for code, info in CLIENTS.items():
+        record = load_file(code)
+        if not record:
+            rows.append({"Cliente": info["name"], "Codice": code, "Spedito": 0.0, "Da Spedire": 0.0, "Totale": 0.0, "Stato": "Dati non caricati"})
+            continue
+        try:
+            data, found_code, found_name = read_export(io.BytesIO(bytes(record["content"])))
+            grand = data[data["Livello"] == "grand_total"]
+            if grand.empty:
+                raise ValueError("Totale mancante")
+            total = grand.iloc[-1]
+            rows.append({
+                "Cliente": info["name"], "Codice": code,
+                "Spedito": float(total["Spedito Totale"]),
+                "Da Spedire": float(total["Da Spedire Totale"]),
+                "Totale": float(total["Totale Complessivo"]), "Stato": "Dati caricati"
+            })
+            for _, r in data[data["Livello"] == "catalog"].iterrows():
+                catalog_rows.append({"Cliente": info["name"], "Catalogo": r["Catalogo"], "Totale": float(r["Totale Complessivo"])})
+        except Exception as exc:
+            rows.append({"Cliente": info["name"], "Codice": code, "Spedito": 0.0, "Da Spedire": 0.0, "Totale": 0.0, "Stato": f"Da aggiornare"})
+
+    overview = pd.DataFrame(rows)
+    loaded = overview[overview["Stato"] == "Dati caricati"]
+    total_spedito = loaded["Spedito"].sum() if not loaded.empty else 0
+    total_da_spedire = loaded["Da Spedire"].sum() if not loaded.empty else 0
+    total_complessivo = loaded["Totale"].sum() if not loaded.empty else 0
+
+    a,b,c,d = st.columns(4)
+    a.metric("Spedito complessivo", euro(total_spedito))
+    b.metric("Da Spedire complessivo", euro(total_da_spedire))
+    c.metric("Totale portafoglio", euro(total_complessivo))
+    d.metric("Clienti aggiornati", f"{len(loaded)} / {len(CLIENTS)}")
+
+    if not loaded.empty:
+        st.subheader("Confronto clienti")
+        fig = go.Figure()
+        fig.add_bar(name="Spedito", x=loaded["Cliente"], y=loaded["Spedito"], marker_color="#087dac")
+        fig.add_bar(name="Da Spedire", x=loaded["Cliente"], y=loaded["Da Spedire"], marker_color="#dff27d")
+        fig.update_layout(barmode="stack", height=420, paper_bgcolor="white", legend_orientation="h", yaxis_title="Euro")
+        st.plotly_chart(fig, use_container_width=True)
+
+        if catalog_rows:
+            cat = pd.DataFrame(catalog_rows).groupby("Catalogo", as_index=False)["Totale"].sum()
+            st.subheader("Ripartizione complessiva per catalogo")
+            fig_cat = go.Figure(go.Pie(labels=cat["Catalogo"], values=cat["Totale"], hole=.48,
+                                       marker_colors=["#168af4","#163eae","#ec6b2d","#760080","#dd469d"], textinfo="label+percent"))
+            fig_cat.update_layout(height=390, paper_bgcolor="white")
+            st.plotly_chart(fig_cat, use_container_width=True)
+
+    st.subheader("Situazione clienti")
+    table = overview.copy()
+    for col in ["Spedito", "Da Spedire", "Totale"]:
+        table[col] = table[col].map(euro)
+    st.dataframe(table, use_container_width=True, hide_index=True)
+
+    available = [r for r in rows if r["Stato"] == "Dati caricati"]
+    if available:
+        st.subheader("Apri dashboard cliente")
+        choices = {f'{r["Cliente"]} · {r["Codice"]}': r["Codice"] for r in available}
+        label = st.selectbox("Cliente", list(choices.keys()), key="admin_client_selector")
+        if st.button("Apri dettaglio cliente", type="primary"):
+            chosen = choices[label]
+            record = load_file(chosen)
+            data, found_code, found_name = read_export(io.BytesIO(bytes(record["content"])))
+            st.session_state["admin_preview"] = (data, found_code, found_name, record["updated_at"])
+        if "admin_preview" in st.session_state:
+            data, found_code, found_name, updated_at = st.session_state["admin_preview"]
+            st.divider()
+            dashboard(data, found_code, found_name)
+            st.caption(f"Ultimo aggiornamento: {updated_at}")
+
 def client_management():
     st.title("Gestione clienti")
     status=dataset_status()
@@ -254,7 +331,7 @@ with st.sidebar:
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if user.get("role")=="admin":
-    st.info("Seleziona 'Aggiorna dati' per caricare gli Excel oppure 'Gestione clienti' per verificarne lo stato.");st.stop()
+    admin_dashboard();st.stop()
 code=str(user.get("customer_code","")).strip().upper()
 record=load_file(code)
 if not record: st.warning("Dati non ancora pubblicati per questo cliente.");st.stop()
