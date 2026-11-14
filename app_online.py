@@ -559,27 +559,58 @@ if page == "Gestione utenti":
     st.stop()
 
 if page == "Aggiorna dati":
-    uploaded_file = st.file_uploader(
-        "Carica Excel cliente",
-        type=["xlsx"],
+    st.subheader("Aggiorna dati clienti")
+    st.caption(
+        "Puoi selezionare più file Excel contemporaneamente. "
+        "Ogni file deve contenere il foglio Export di un solo cliente."
     )
 
-    if uploaded_file is not None:
-        file_content = uploaded_file.getvalue()
+    uploaded_files = st.file_uploader(
+        "Carica uno o più file Excel cliente",
+        type=["xlsx"],
+        accept_multiple_files=True,
+    )
 
-        try:
-            _, customer_code, customer_name = read_export(io.BytesIO(file_content))
-            save_customer_file(
-                customer_code,
-                customer_name,
-                uploaded_file.name,
-                file_content,
-            )
-            st.success(
-                f"Dati aggiornati correttamente per {customer_code} - {customer_name}."
-            )
-        except Exception as error:
-            st.error(f"Impossibile aggiornare i dati: {error}")
+    if uploaded_files:
+        if st.button("Elabora e salva tutti i file", type="primary"):
+            successes = []
+            errors = []
+            progress = st.progress(0)
+
+            for index, uploaded_file in enumerate(uploaded_files, start=1):
+                try:
+                    file_content = uploaded_file.getvalue()
+                    _, customer_code, customer_name = read_export(
+                        io.BytesIO(file_content)
+                    )
+                    save_customer_file(
+                        customer_code,
+                        customer_name,
+                        uploaded_file.name,
+                        file_content,
+                    )
+                    successes.append(
+                        f"{uploaded_file.name}: {customer_code} - {customer_name}"
+                    )
+                except Exception as error:
+                    errors.append(f"{uploaded_file.name}: {error}")
+
+                progress.progress(index / len(uploaded_files))
+
+            if successes:
+                st.success(
+                    f"Caricati correttamente {len(successes)} file su "
+                    f"{len(uploaded_files)}."
+                )
+                for item in successes:
+                    st.write(f"✓ {item}")
+
+            if errors:
+                st.error(
+                    f"Non elaborati {len(errors)} file su {len(uploaded_files)}."
+                )
+                for item in errors:
+                    st.write(f"• {item}")
 
     st.stop()
 
