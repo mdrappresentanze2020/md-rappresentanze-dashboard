@@ -31,6 +31,34 @@ st.markdown(
     .stMetric {background:#fff!important; border:1px solid #d7dde5; border-radius:14px; padding:14px;}
     [data-testid="stMetricLabel"] p {color:#3f4854!important; font-weight:700;}
     [data-testid="stMetricValue"] {color:#4F8FC5!important;}
+    /* Testi form e uploader sempre leggibili su sfondo chiaro */
+    [data-testid="stForm"] label,
+    [data-testid="stForm"] label p,
+    [data-testid="stForm"] [data-testid="stWidgetLabel"] p,
+    [data-testid="stFileUploader"] label,
+    [data-testid="stFileUploader"] label p,
+    [data-testid="stFileUploader"] [data-testid="stWidgetLabel"] p {
+        color:#111111!important;
+        font-weight:600!important;
+    }
+    [data-testid="stForm"] input,
+    [data-testid="stForm"] textarea {
+        color:#111111!important;
+        background:#ffffff!important;
+        border:1px solid #9ca3af!important;
+    }
+    [data-testid="stForm"] input::placeholder,
+    [data-testid="stForm"] textarea::placeholder {color:#6b7280!important; opacity:1!important;}
+    [data-testid="stForm"] [data-baseweb="select"] > div {
+        background:#ffffff!important;
+        color:#111111!important;
+        border-color:#9ca3af!important;
+    }
+    [data-testid="stForm"] [data-baseweb="select"] * {color:#111111!important;}
+    [data-testid="stFileUploader"] section {background:#ffffff!important; color:#111111!important;}
+    [data-testid="stFileUploader"] section * {color:#111111!important;}
+    [data-testid="stFileUploader"] button {background:#e5e7eb!important; color:#111111!important; border-color:#9ca3af!important;}
+    [data-testid="stFileUploader"] button * {color:#111111!important;}
     [data-testid="stSidebar"] .stButton button {background:#087dac!important; border-color:#087dac!important;}
     [data-testid="stSidebar"] .stButton button p,
     [data-testid="stSidebar"] .stButton button span {color:#ffffff!important; font-weight:700!important;}
