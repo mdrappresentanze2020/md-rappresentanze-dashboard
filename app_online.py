@@ -29,6 +29,9 @@ st.markdown(
     .stMetric {background:#fff!important; border:1px solid #d7dde5; border-radius:14px; padding:14px;}
     [data-testid="stMetricLabel"] p {color:#3f4854!important; font-weight:700;}
     [data-testid="stMetricValue"] {color:#4F8FC5!important;}
+    [data-testid="stSidebar"] .stButton button {background:#087dac!important; border-color:#087dac!important;}
+    [data-testid="stSidebar"] .stButton button p,
+    [data-testid="stSidebar"] .stButton button span {color:#ffffff!important; font-weight:700!important;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -322,7 +325,7 @@ def show_dashboard(data, customer_code, customer_name):
     st.dataframe(detail, use_container_width=True, hide_index=True)
 
 
-st.image("logo_md.png", width=300)
+st.image("logo_md.png", width=220)
 st.session_state.setdefault("user", None)
 
 if not st.session_state.user:
@@ -344,7 +347,7 @@ if not st.session_state.user:
 current_user = st.session_state.user
 
 with st.sidebar:
-    st.image("logo_md.png", use_container_width=True)
+    st.image("logo_md.png", width=185)
     st.write(f"Utente: **{current_user['username']}**")
 
     if st.button("Esci"):
