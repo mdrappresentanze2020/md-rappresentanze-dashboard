@@ -71,42 +71,143 @@ def normalize(value):
     if value is None or pd.isna(value): return ""
     return re.sub(r"\s+", " ", str(value).replace("\n", " ")).strip()
 
-def read_export(file_obj):
-    if hasattr(file_obj, "seek"): file_obj.seek(0)
-    raw = pd.read_excel(file_obj, sheet_name="Export", header=None, engine="openpyxl")
-    if raw.empty: raise ValueError("Il foglio Export è vuoto.")
-    header_idx = next((idx for idx,row in raw.iterrows() if "Market Catalog" in [normalize(v) for v in row.tolist()]), None)
-    if header_idx is None: raise ValueError("Intestazione 'Market Catalog' non trovata nel foglio Export.")
+def extract_customer(raw):
     all_text = " ".join(normalize(v) for v in raw.fillna("").to_numpy().flatten())
-    match = re.search(r"Customer\s+Full\s*(?:è|=|:)\s*(M\d+)\s*-\s*(.+?)(?=\s+(?:Bill\s+Month(?:\s+Short)?|Anno\s+Corrente|Market\s+Catalog)\s*(?:è|=|:)|$)", all_text, re.I)
-    if not match: raise ValueError("Codice cliente non trovato nel filtro 'Customer Full'.")
-    code, name = match.group(1).strip().upper(), match.group(2).strip(" -")
-    if code not in CLIENTS: raise ValueError(f"Cliente {code} non presente nell'anagrafica autorizzata.")
-    if hasattr(file_obj, "seek"): file_obj.seek(0)
-    data = pd.read_excel(file_obj, sheet_name="Export", header=header_idx, engine="openpyxl")
-    data.columns = [normalize(c) for c in data.columns]
-    data["Market Catalog"] = data["Market Catalog"].map(normalize)
-    for col in NUMERIC_COLUMNS:
-        if col not in data.columns: data[col] = 0.0
-        data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0.0)
-    data = data[data["Market Catalog"].isin(CATEGORIES + ["Total"])].copy().rename(columns={"Market Catalog":"Voce"})
-    if data.empty: raise ValueError("Nessuna categoria valida trovata.")
+    match = re.search(
+        r"Customer\s+Full\s*(?:è|=|:)\s*(M\d+)\s*-\s*(.+?)(?=\s+(?:Filter\s+Bill|Bill-Deliv|Bill\s+Month|Anno\s+Corrente|Market\s+Catalog)|$)",
+        all_text, re.I
+    )
+    if not match:
+        raise ValueError("Codice cliente non trovato nel filtro 'Customer Full'.")
+    code = match.group(1).strip().upper()
+    name = match.group(2).strip(" -")
+    if code not in CLIENTS:
+        raise ValueError(f"Cliente {code} non presente nell'anagrafica autorizzata.")
+    return code, name
+
+def read_export(file_obj):
+    if hasattr(file_obj, "seek"):
+        file_obj.seek(0)
+    raw = pd.read_excel(file_obj, sheet_name="Export", header=None, engine="openpyxl")
+    if raw.empty:
+        raise ValueError("Il foglio Export è vuoto.")
+    code, name = extract_customer(raw)
+
+    # Nuovo tracciato dettagliato: tre righe di intestazione e 14 colonne.
+    header_idx = next((idx for idx, row in raw.iterrows()
+                       if "Cliente" in [normalize(v) for v in row.tolist()]
+                       and "Catalogo" in [normalize(v) for v in row.tolist()]
+                       and "Famiglia Prodotto" in [normalize(v) for v in row.tolist()]), None)
+    if header_idx is None:
+        raise ValueError("Intestazioni Cliente, Catalogo e Famiglia Prodotto non trovate.")
+
+    records = []
+    current_client = ""
+    current_catalog = ""
+    for r in range(header_idx + 1, len(raw)):
+        row = raw.iloc[r].tolist() + [None] * max(0, 14-len(raw.iloc[r].tolist()))
+        client = normalize(row[0])
+        catalog = normalize(row[1])
+        family = normalize(row[2])
+        if client.startswith("Filtri applicati"):
+            break
+        if client:
+            current_client = client
+        if catalog:
+            current_catalog = catalog
+        if not client and not catalog and not family:
+            continue
+        if current_client == "Total":
+            level = "grand_total"
+            label = "Total"
+        elif catalog == "Total" and not family:
+            level = "grand_total"
+            label = "Total"
+        elif family == "Total":
+            level = "catalog"
+            label = current_catalog
+        elif family:
+            level = "family"
+            label = family
+        else:
+            continue
+        nums = [pd.to_numeric(row[i], errors="coerce") for i in range(3,14)]
+        nums = [0.0 if pd.isna(x) else float(x) for x in nums]
+        records.append({
+            "Livello": level, "Catalogo": current_catalog if level != "grand_total" else "Total",
+            "Famiglia Prodotto": label if level == "family" else "",
+            "Spedito Q1": nums[0], "Spedito Q2": nums[1], "Spedito Q3": nums[2], "Spedito Q4": nums[3], "Spedito Totale": nums[4],
+            "Da Spedire Q1": nums[5], "Da Spedire Q2": nums[6], "Da Spedire Q3": nums[7], "Da Spedire Q4": nums[8], "Da Spedire Totale": nums[9],
+            "Totale Complessivo": nums[10]
+        })
+    data = pd.DataFrame(records)
+    if data.empty:
+        raise ValueError("Nessuna riga dettagliata valida trovata.")
     return data, code, name
 
-def euro(v): return f"€ {float(v):,.0f}".replace(",", ".")
-def number(v): return f"{float(v):,.0f}".replace(",", ".")
-def percent(v): return f"{float(v)*100:.1f}%".replace(".", ",")
+def euro(v):
+    return f"€ {float(v):,.0f}".replace(",", ".")
 
 def dashboard(data, code, name):
-    totals=data[data["Voce"]=="Total"]
-    detail=data[data["Voce"]!="Total"].copy()
-    total=totals.iloc[0] if not totals.empty else detail.sum(numeric_only=True)
-    ac,budget,qty=float(total.get("Fatturato AC",0)),float(total.get("Budget",0)),float(total.get("Quantità AC (No-Acc)",0))
-    st.markdown(f'<div class="brandline"><b>MD Rappresentanze</b>&nbsp;&nbsp; Fatturato &nbsp;&nbsp; Cliente: {code} - {name}</div><div class="titleband">FATTURATO - Prodotti</div>',unsafe_allow_html=True)
-    st.markdown('<div class="months">'+''.join(f'<div class="month">{m}</div>' for m in ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"])+"</div>",unsafe_allow_html=True)
-    c1,c2,c3,c4=st.columns(4);c1.metric("Fatturato AC",euro(ac));c2.metric("Budget",euro(budget));c3.metric("Raggiungimento budget",percent(ac/budget if budget else 0));c4.metric("Quantità AC",number(qty))
-    fig=go.Figure(go.Pie(labels=detail["Voce"],values=detail["Fatturato AC"],hole=.48,marker_colors=["#168af4","#163eae","#ec6b2d","#760080","#dd469d"],textinfo="label+percent"));fig.update_layout(title="Fatturato AC - Catalogo",height=400,paper_bgcolor="white");st.plotly_chart(fig,use_container_width=True)
-    out=detail[["Voce","Fatturato AC","Budget","% AC / Budget","K Lordo AC","Quantità AC (No-Acc)"]].copy();out["Fatturato AC"]=out["Fatturato AC"].map(euro);out["Budget"]=out["Budget"].map(euro);out["% AC / Budget"]=out["% AC / Budget"].map(percent);out["K Lordo AC"]=out["K Lordo AC"].map(percent);out["Quantità AC (No-Acc)"]=out["Quantità AC (No-Acc)"].map(number);st.dataframe(out,use_container_width=True,hide_index=True)
+    grand = data[data["Livello"] == "grand_total"]
+    if grand.empty:
+        raise ValueError("Riga totale complessivo non trovata.")
+    total = grand.iloc[-1]
+    catalogs = data[data["Livello"] == "catalog"].copy()
+    families = data[data["Livello"] == "family"].copy()
+
+    spedito = float(total["Spedito Totale"])
+    da_spedire = float(total["Da Spedire Totale"])
+    complessivo = float(total["Totale Complessivo"])
+    incidenza = da_spedire / complessivo if complessivo else 0
+
+    st.markdown(
+        f'<div class="brandline"><b>MD Rappresentanze</b>&nbsp;&nbsp; Cliente: {code} - {name}</div>'
+        '<div class="titleband">FATTURATO - Spedito e Da Spedire</div>', unsafe_allow_html=True)
+
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Spedito", euro(spedito))
+    c2.metric("Da Spedire", euro(da_spedire))
+    c3.metric("Totale complessivo", euro(complessivo))
+    c4.metric("Incidenza Da Spedire", f"{incidenza*100:.1f}%".replace(".", ","))
+
+    st.subheader("Andamento trimestrale")
+    qdata = pd.DataFrame({
+        "Trimestre": ["Q1","Q2","Q3","Q4"],
+        "Spedito": [total[f"Spedito Q{i}"] for i in range(1,5)],
+        "Da Spedire": [total[f"Da Spedire Q{i}"] for i in range(1,5)]
+    })
+    fig_q = go.Figure()
+    fig_q.add_bar(name="Spedito", x=qdata["Trimestre"], y=qdata["Spedito"], marker_color="#087dac")
+    fig_q.add_bar(name="Da Spedire", x=qdata["Trimestre"], y=qdata["Da Spedire"], marker_color="#dff27d")
+    fig_q.update_layout(barmode="stack", height=390, paper_bgcolor="white", yaxis_title="Euro", legend_orientation="h")
+    st.plotly_chart(fig_q, use_container_width=True)
+
+    left,right = st.columns(2)
+    with left:
+        st.subheader("Totale per catalogo")
+        fig_cat = go.Figure(go.Pie(labels=catalogs["Catalogo"], values=catalogs["Totale Complessivo"], hole=.48,
+                                   marker_colors=["#168af4","#163eae","#ec6b2d","#760080","#dd469d"], textinfo="label+percent"))
+        fig_cat.update_layout(height=390, paper_bgcolor="white")
+        st.plotly_chart(fig_cat, use_container_width=True)
+    with right:
+        st.subheader("Spedito vs Da Spedire per catalogo")
+        fig_cat2 = go.Figure()
+        fig_cat2.add_bar(name="Spedito", x=catalogs["Catalogo"], y=catalogs["Spedito Totale"], marker_color="#087dac")
+        fig_cat2.add_bar(name="Da Spedire", x=catalogs["Catalogo"], y=catalogs["Da Spedire Totale"], marker_color="#dff27d")
+        fig_cat2.update_layout(barmode="stack",height=390,paper_bgcolor="white",legend_orientation="h",yaxis_title="Euro")
+        st.plotly_chart(fig_cat2,use_container_width=True)
+
+    st.subheader("Riepilogo cataloghi")
+    summary = catalogs[["Catalogo","Spedito Q1","Spedito Q2","Spedito Q3","Spedito Q4","Spedito Totale","Da Spedire Q1","Da Spedire Q2","Da Spedire Q3","Da Spedire Q4","Da Spedire Totale","Totale Complessivo"]].copy()
+    for col in summary.columns[1:]: summary[col] = summary[col].map(euro)
+    st.dataframe(summary, use_container_width=True, hide_index=True)
+
+    st.subheader("Dettaglio famiglie prodotto")
+    selected = st.selectbox("Catalogo", catalogs["Catalogo"].tolist())
+    family_view = families[families["Catalogo"] == selected][["Famiglia Prodotto","Spedito Q1","Spedito Q2","Spedito Q3","Spedito Q4","Spedito Totale","Da Spedire Q1","Da Spedire Q2","Da Spedire Q3","Da Spedire Q4","Da Spedire Totale","Totale Complessivo"]].copy()
+    for col in family_view.columns[1:]: family_view[col] = family_view[col].map(euro)
+    st.dataframe(family_view, use_container_width=True, hide_index=True)
 
 def client_management():
     st.title("Gestione clienti")
@@ -116,7 +217,7 @@ def client_management():
         st.markdown(f'<div class="client-card"><b>{info["name"]}</b><br>Codice: {code} · Utente: {info["username"]}<br><b>{state}</b>{update}</div>',unsafe_allow_html=True)
 
 def upload_page():
-    st.title("Aggiorna dati clienti")
+    st.title("Aggiorna dati clienti - tracciato dettagliato")
     uploads=st.file_uploader("Carica i file Excel dei clienti",type=["xlsx"],accept_multiple_files=True)
     if st.button("Elabora e salva tutti i file",type="primary",disabled=not uploads):
         ok,errors=[],[]
