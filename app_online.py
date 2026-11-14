@@ -325,7 +325,6 @@ def show_dashboard(data, customer_code, customer_name):
     st.dataframe(detail, use_container_width=True, hide_index=True)
 
 
-st.image("logo_md.png", width=220)
 st.session_state.setdefault("user", None)
 
 if not st.session_state.user:
