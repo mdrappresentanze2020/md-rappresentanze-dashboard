@@ -20,7 +20,6 @@ st.markdown(
     <style>
     .stApp {background:#f7f7f7; color:#202124;}
     .block-container {padding-top:1rem; max-width:1500px;}
-    .top-white-space{height:72px;background:#ffffff;width:100%;margin:0 0 6px 0;}
     [data-testid="stHeader"] {background:#087dac;}
     [data-testid="stSidebar"] {background:#f3f4f6!important; border-right:1px solid #d6dbe1;}
     [data-testid="stSidebar"] * {color:#1f2937!important;}
@@ -492,7 +491,6 @@ def show_dashboard(data, customer_code, customer_name):
     st.dataframe(detail, use_container_width=True, hide_index=True)
 
 
-st.markdown('<div class="top-white-space"></div>', unsafe_allow_html=True)
 st.session_state.setdefault("user", None)
 
 if not st.session_state.user:
