@@ -57,9 +57,12 @@ def ensure_targets_table():
     with db_connection().session as session:
         session.execute(text("""CREATE TABLE IF NOT EXISTS customer_targets(customer_code TEXT PRIMARY KEY,super_pre_split NUMERIC NOT NULL DEFAULT 0,super_pre_aqua NUMERIC NOT NULL DEFAULT 0,target_annuale_hvac NUMERIC NOT NULL DEFAULT 0,target_q1_hvac NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
         session.commit()
-def load_targets():
+def load_targets(code=None):
     ensure_targets_table()
     with db_connection().session as session:
+        if code:
+            row=session.execute(text("SELECT customer_code,super_pre_split,super_pre_aqua,target_annuale_hvac,target_q1_hvac,updated_at FROM customer_targets WHERE customer_code=:code"), {"code":code}).mappings().first()
+            return row or {}
         rows=session.execute(text("SELECT customer_code,super_pre_split,super_pre_aqua,target_annuale_hvac,target_q1_hvac,updated_at FROM customer_targets")).mappings().all()
     return {r["customer_code"]:r for r in rows}
 def save_targets(code, super_split, super_aqua, annuale, q1):
@@ -184,6 +187,13 @@ def dashboard(data, code, name):
     c2.metric("Da Spedire", euro(da_spedire))
     c3.metric("Totale complessivo", euro(complessivo))
     c4.metric("Incidenza Da Spedire", f"{incidenza*100:.1f}%".replace(".", ","))
+    targets = load_targets(code)
+    st.subheader("Target")
+    t1,t2,t3,t4 = st.columns(4)
+    t1.metric("Super Pre Split", euro(float(targets.get("super_pre_split",0) or 0)))
+    t2.metric("Super Pre Aqua", euro(float(targets.get("super_pre_aqua",0) or 0)))
+    t3.metric("Target annuale Home + Split + VRF + Fancoil", euro(float(targets.get("target_annuale_hvac",0) or 0)))
+    t4.metric("Target Q1 Home + Split + VRF + Fancoil", euro(float(targets.get("target_q1_hvac",0) or 0)))
 
     st.subheader("Andamento trimestrale")
     qdata = pd.DataFrame({
@@ -309,12 +319,12 @@ def targets_page():
         with st.expander(f"{info['name']} · {code}", expanded=False):
             with st.form(f"targets_{code}"):
                 c1,c2=st.columns(2)
-                super_split=c1.number_input("Super Pre Split (€)", min_value=0.0, value=float(t.get("super_pre_split",0) or 0), step=1000.0, format="%.2f")
-                super_aqua=c2.number_input("Super Pre Aqua (€)", min_value=0.0, value=float(t.get("super_pre_aqua",0) or 0), step=1000.0, format="%.2f")
+                super_split=c1.number_input("Super Pre Split (€)",min_value=0.0,value=float(t.get("super_pre_split",0) or 0),step=1000.0,format="%.2f")
+                super_aqua=c2.number_input("Super Pre Aqua (€)",min_value=0.0,value=float(t.get("super_pre_aqua",0) or 0),step=1000.0,format="%.2f")
                 c3,c4=st.columns(2)
-                annuale=c3.number_input("Target annuale Home + Split + VRF + Fancoil (€)", min_value=0.0, value=float(t.get("target_annuale_hvac",0) or 0), step=1000.0, format="%.2f")
-                q1=c4.number_input("Target Q1 Home + Split + VRF + Fancoil (€)", min_value=0.0, value=float(t.get("target_q1_hvac",0) or 0), step=1000.0, format="%.2f")
-                if st.form_submit_button("Salva Target", type="primary"):
+                annuale=c3.number_input("Target annuale Home + Split + VRF + Fancoil (€)",min_value=0.0,value=float(t.get("target_annuale_hvac",0) or 0),step=1000.0,format="%.2f")
+                q1=c4.number_input("Target Q1 Home + Split + VRF + Fancoil (€)",min_value=0.0,value=float(t.get("target_q1_hvac",0) or 0),step=1000.0,format="%.2f")
+                if st.form_submit_button("Salva Target",type="primary"):
                     save_targets(code,super_split,super_aqua,annuale,q1)
                     st.success(f"Target salvati per {info['name']}.")
                     st.rerun()
