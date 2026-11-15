@@ -53,6 +53,20 @@ def ensure_table():
     with db_connection().session as session:
         session.execute(text("""CREATE TABLE IF NOT EXISTS customer_exports(customer_code TEXT PRIMARY KEY,customer_name TEXT NOT NULL,filename TEXT NOT NULL,content BYTEA NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
         session.commit()
+def ensure_targets_table():
+    with db_connection().session as session:
+        session.execute(text("""CREATE TABLE IF NOT EXISTS customer_targets(customer_code TEXT PRIMARY KEY,super_pre_split NUMERIC NOT NULL DEFAULT 0,super_pre_aqua NUMERIC NOT NULL DEFAULT 0,target_annuale_hvac NUMERIC NOT NULL DEFAULT 0,target_q1_hvac NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+        session.commit()
+def load_targets():
+    ensure_targets_table()
+    with db_connection().session as session:
+        rows=session.execute(text("SELECT customer_code,super_pre_split,super_pre_aqua,target_annuale_hvac,target_q1_hvac,updated_at FROM customer_targets")).mappings().all()
+    return {r["customer_code"]:r for r in rows}
+def save_targets(code, super_split, super_aqua, annuale, q1):
+    ensure_targets_table()
+    with db_connection().session as session:
+        session.execute(text("""INSERT INTO customer_targets(customer_code,super_pre_split,super_pre_aqua,target_annuale_hvac,target_q1_hvac,updated_at) VALUES(:code,:split,:aqua,:annuale,:q1,CURRENT_TIMESTAMP) ON CONFLICT(customer_code) DO UPDATE SET super_pre_split=:split,super_pre_aqua=:aqua,target_annuale_hvac=:annuale,target_q1_hvac=:q1,updated_at=CURRENT_TIMESTAMP"""), {"code":code,"split":float(super_split),"aqua":float(super_aqua),"annuale":float(annuale),"q1":float(q1)})
+        session.commit()
 def save_file(code, name, filename, content):
     ensure_table()
     with db_connection().session as session:
@@ -286,6 +300,26 @@ def admin_dashboard():
             dashboard(data, found_code, found_name)
             st.caption(f"Ultimo aggiornamento: {updated_at}")
 
+def targets_page():
+    st.title("Target annuali")
+    st.caption("I valori vengono salvati su Neon e restano invariati finché non vengono modificati dall'amministratore.")
+    current=load_targets()
+    for code,info in CLIENTS.items():
+        t=current.get(code,{})
+        with st.expander(f"{info['name']} · {code}", expanded=False):
+            with st.form(f"targets_{code}"):
+                c1,c2=st.columns(2)
+                super_split=c1.number_input("Super Pre Split (€)", min_value=0.0, value=float(t.get("super_pre_split",0) or 0), step=1000.0, format="%.2f")
+                super_aqua=c2.number_input("Super Pre Aqua (€)", min_value=0.0, value=float(t.get("super_pre_aqua",0) or 0), step=1000.0, format="%.2f")
+                c3,c4=st.columns(2)
+                annuale=c3.number_input("Target annuale Home + Split + VRF + Fancoil (€)", min_value=0.0, value=float(t.get("target_annuale_hvac",0) or 0), step=1000.0, format="%.2f")
+                q1=c4.number_input("Target Q1 Home + Split + VRF + Fancoil (€)", min_value=0.0, value=float(t.get("target_q1_hvac",0) or 0), step=1000.0, format="%.2f")
+                if st.form_submit_button("Salva Target", type="primary"):
+                    save_targets(code,super_split,super_aqua,annuale,q1)
+                    st.success(f"Target salvati per {info['name']}.")
+                    st.rerun()
+            if t.get("updated_at"):
+                st.caption(f"Ultima modifica: {t['updated_at']}")
 def client_management():
     st.title("Gestione clienti")
     status=dataset_status()
@@ -325,11 +359,12 @@ with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
     if st.button("Esci"): st.session_state.user=None;st.rerun()
-    pages=["Dashboard","Aggiorna dati","Gestione clienti"] if user.get("role")=="admin" else ["Dashboard"]
+    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali"] if user.get("role")=="admin" else ["Dashboard"]
     page=st.radio("Sezione",pages)
 
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
+if page=="Target annuali": targets_page();st.stop()
 if user.get("role")=="admin":
     admin_dashboard();st.stop()
 code=str(user.get("customer_code","")).strip().upper()
