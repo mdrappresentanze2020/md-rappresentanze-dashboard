@@ -189,11 +189,35 @@ def dashboard(data, code, name):
     c4.metric("Incidenza Da Spedire", f"{incidenza*100:.1f}%".replace(".", ","))
     targets = load_targets(code)
     st.subheader("Target")
+    target_split=float(targets.get("super_pre_split",0) or 0)
+    target_aqua=float(targets.get("super_pre_aqua",0) or 0)
+    target_annuale=float(targets.get("target_annuale_hvac",0) or 0)
+    target_q1=float(targets.get("target_q1_hvac",0) or 0)
+
+    hvac_catalogs = catalogs[catalogs["Catalogo"].isin(["Home","Split","VRF","Fancoil"])]
+    consuntivo_annuale = float(hvac_catalogs["Totale Complessivo"].sum())
+    consuntivo_q1 = float((hvac_catalogs["Spedito Q1"] + hvac_catalogs["Da Spedire Q1"]).sum())
+
+    def raggiungimento(consuntivo, target):
+        return None if target <= 0 else (consuntivo / target) * 100
+    def pct_label(value):
+        return "Target da definire" if value is None else f"{value:.1f}%".replace(".", ",")
+
+    r_annuale = raggiungimento(consuntivo_annuale, target_annuale)
+    r_q1 = raggiungimento(consuntivo_q1, target_q1)
     t1,t2,t3,t4 = st.columns(4)
-    t1.metric("Super Pre Split", euro(float(targets.get("super_pre_split",0) or 0)))
-    t2.metric("Super Pre Aqua", euro(float(targets.get("super_pre_aqua",0) or 0)))
-    t3.metric("Target annuale Home + Split + VRF + Fancoil", euro(float(targets.get("target_annuale_hvac",0) or 0)))
-    t4.metric("Target Q1 Home + Split + VRF + Fancoil", euro(float(targets.get("target_q1_hvac",0) or 0)))
+    t1.metric("Super Pre Split", euro(target_split), delta="Target da definire" if target_split <= 0 else "Consuntivo da associare", delta_color="off")
+    t2.metric("Super Pre Aqua", euro(target_aqua), delta="Target da definire" if target_aqua <= 0 else "Consuntivo da associare", delta_color="off")
+    t3.metric("Target annuale Home + Split + VRF + Fancoil", euro(target_annuale), delta=pct_label(r_annuale), delta_color="off")
+    t4.metric("Target Q1 Home + Split + VRF + Fancoil", euro(target_q1), delta=pct_label(r_q1), delta_color="off")
+
+    p1,p2 = st.columns(2)
+    with p1:
+        st.caption(f"Consuntivo Home + Split + VRF + Fancoil: {euro(consuntivo_annuale)}")
+        st.progress(min(max((r_annuale or 0)/100,0),1), text=f"Raggiungimento annuale: {pct_label(r_annuale)}")
+    with p2:
+        st.caption(f"Consuntivo Q1 Home + Split + VRF + Fancoil: {euro(consuntivo_q1)}")
+        st.progress(min(max((r_q1 or 0)/100,0),1), text=f"Raggiungimento Q1: {pct_label(r_q1)}")
 
     st.subheader("Andamento trimestrale")
     qdata = pd.DataFrame({
