@@ -2,6 +2,10 @@ import hashlib
 import hmac
 import io
 import re
+import json
+import base64
+import urllib.parse
+import urllib.request
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -70,6 +74,34 @@ def save_targets(code, super_split, super_aqua, annuale, q1):
     with db_connection().session as session:
         session.execute(text("""INSERT INTO customer_targets(customer_code,super_pre_split,super_pre_aqua,target_annuale_hvac,target_q1_hvac,updated_at) VALUES(:code,:split,:aqua,:annuale,:q1,CURRENT_TIMESTAMP) ON CONFLICT(customer_code) DO UPDATE SET super_pre_split=:split,super_pre_aqua=:aqua,target_annuale_hvac=:annuale,target_q1_hvac=:q1,updated_at=CURRENT_TIMESTAMP"""), {"code":code,"split":float(super_split),"aqua":float(super_aqua),"annuale":float(annuale),"q1":float(q1)})
         session.commit()
+def load_google_order_pdf(customer_code, order_number):
+    config = st.secrets.get("google_pdf", {})
+    webapp_url = str(config.get("webapp_url", "")).strip()
+    token = str(config.get("token", "")).strip()
+    if not webapp_url or not token:
+        return None, "Configurazione Google PDF non disponibile."
+    params = urllib.parse.urlencode({
+        "cliente": str(customer_code).strip().upper(),
+        "ordine": str(order_number).strip().upper(),
+        "token": token,
+    })
+    url = webapp_url + ("&" if "?" in webapp_url else "?") + params
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "MD-Rappresentanze-Dashboard/1.0"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if payload.get("ok") and payload.get("trovato") and payload.get("pdf"):
+            return {
+                "filename": payload.get("filename") or f"{order_number}.pdf",
+                "content": base64.b64decode(payload["pdf"]),
+                "source": "Google Drive",
+            }, None
+        if payload.get("trovato") is False:
+            return None, None
+        return None, payload.get("errore") or "Risposta Google PDF non valida."
+    except Exception as exc:
+        return None, f"Collegamento Google PDF non disponibile: {exc}"
+
 def ensure_order_pdfs_table():
     with db_connection().session as session:
         session.execute(text("""CREATE TABLE IF NOT EXISTS order_pdfs(customer_code TEXT NOT NULL,order_number TEXT NOT NULL,filename TEXT NOT NULL,content BYTEA NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,order_number))"""))
@@ -359,17 +391,27 @@ def dashboard(data, code, name):
         o1.metric("Numero ordine", selected_order)
         o2.metric("Catalogo", selected_catalog)
         o3.metric("Totale ordine", euro(selected_row["Totale Complessivo"]))
-        pdf_record = load_order_pdf(code, selected_order)
+        pdf_record, pdf_error = load_google_order_pdf(code, selected_order)
+        if not pdf_record:
+            neon_pdf = load_order_pdf(code, selected_order)
+            if neon_pdf:
+                pdf_record = {
+                    "filename": neon_pdf["filename"],
+                    "content": bytes(neon_pdf["content"]),
+                    "source": "Archivio manuale",
+                }
         if pdf_record:
             st.download_button(
                 "Apri / Scarica conferma PDF",
-                data=bytes(pdf_record["content"]),
+                data=pdf_record["content"],
                 file_name=pdf_record["filename"],
                 mime="application/pdf",
                 key=f"download_pdf_{code}_{selected_order}",
                 type="primary"
             )
-            st.caption(f"PDF aggiornato: {pdf_record['updated_at']}")
+            st.caption(f"Documento disponibile da: {pdf_record['source']}")
+        elif pdf_error:
+            st.warning(pdf_error)
         else:
             st.info("PDF conferma non ancora disponibile.")
 
