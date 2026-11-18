@@ -16,7 +16,7 @@ st.set_page_config(page_title="MD Rappresentanze | Clienti", page_icon="📊", l
 st.markdown("""<style>
 .stApp{background:#f7f7f7;color:#202124}.block-container{padding-top:3.6rem;max-width:1500px}
 [data-testid="stHeader"]{background:#087dac}
-[data-testid="stSidebar"]{background:#f3f4f6!important;border-right:1px solid #d6dbe1}
+[data-testid="stSidebar"]{background:#ffffff!important;border-right:1px solid #e5e7eb}
 [data-testid="stSidebar"] *{color:#1f2937!important}
 [data-testid="stSidebar"] button{background:#2f2f2f!important;border:1px solid #2f2f2f!important}
 [data-testid="stSidebar"] button p,[data-testid="stSidebar"] button span,[data-testid="stSidebar"] button div{color:#ffffff!important;font-weight:700!important}
@@ -284,7 +284,7 @@ def dashboard(data, code, name):
     target_annuale=float(targets.get("target_annuale_hvac",0) or 0)
     target_q1=float(targets.get("target_q1_hvac",0) or 0)
 
-    hvac_catalogs = catalogs[catalogs["Catalogo"].isin(["Home","Split","VRF","Fancoil"])]
+    hvac_catalogs = catalogs[catalogs["Catalogo"].isin(["Home","Split","Fancoil"])]
     consuntivo_annuale = float(hvac_catalogs["Totale Complessivo"].sum())
     consuntivo_q1 = float((hvac_catalogs["Spedito Q1"] + hvac_catalogs["Da Spedire Q1"]).sum())
 
@@ -298,15 +298,15 @@ def dashboard(data, code, name):
     t1,t2,t3,t4 = st.columns(4)
     t1.metric("Super Pre Split", euro(target_split), delta="Target da definire" if target_split <= 0 else "Consuntivo da associare", delta_color="off")
     t2.metric("Super Pre Aqua", euro(target_aqua), delta="Target da definire" if target_aqua <= 0 else "Consuntivo da associare", delta_color="off")
-    t3.metric("Target annuale Home + Split + VRF + Fancoil", euro(target_annuale), delta=pct_label(r_annuale), delta_color="off")
-    t4.metric("Target Q1 Home + Split + VRF + Fancoil", euro(target_q1), delta=pct_label(r_q1), delta_color="off")
+    t3.metric("Target annuale Home + Split + Fancoil", euro(target_annuale), delta=pct_label(r_annuale), delta_color="off")
+    t4.metric("Target Q1 Home + Split + Fancoil", euro(target_q1), delta=pct_label(r_q1), delta_color="off")
 
-    p1,p2 = st.columns(2)
-    with p1:
-        st.caption(f"Consuntivo Home + Split + VRF + Fancoil: {euro(consuntivo_annuale)}")
+    _, p_annuale, p_q1, _ = st.columns([1,1,1,1])
+    with p_annuale:
+        st.markdown(f"<div style='text-align:center;font-weight:700;color:#202124'>Consuntivo Home + Split + Fancoil<br>{euro(consuntivo_annuale)}</div>", unsafe_allow_html=True)
         st.progress(min(max((r_annuale or 0)/100,0),1), text=f"Raggiungimento annuale: {pct_label(r_annuale)}")
-    with p2:
-        st.caption(f"Consuntivo Q1 Home + Split + VRF + Fancoil: {euro(consuntivo_q1)}")
+    with p_q1:
+        st.markdown(f"<div style='text-align:center;font-weight:700;color:#202124'>Consuntivo Q1 Home + Split + Fancoil<br>{euro(consuntivo_q1)}</div>", unsafe_allow_html=True)
         st.progress(min(max((r_q1 or 0)/100,0),1), text=f"Raggiungimento Q1: {pct_label(r_q1)}")
 
     st.subheader("Andamento trimestrale")
@@ -608,8 +608,8 @@ def targets_page():
                 super_split=c1.number_input("Super Pre Split (€)",min_value=0.0,value=float(t.get("super_pre_split",0) or 0),step=1000.0,format="%.2f")
                 super_aqua=c2.number_input("Super Pre Aqua (€)",min_value=0.0,value=float(t.get("super_pre_aqua",0) or 0),step=1000.0,format="%.2f")
                 c3,c4=st.columns(2)
-                annuale=c3.number_input("Target annuale Home + Split + VRF + Fancoil (€)",min_value=0.0,value=float(t.get("target_annuale_hvac",0) or 0),step=1000.0,format="%.2f")
-                q1=c4.number_input("Target Q1 Home + Split + VRF + Fancoil (€)",min_value=0.0,value=float(t.get("target_q1_hvac",0) or 0),step=1000.0,format="%.2f")
+                annuale=c3.number_input("Target annuale Home + Split + Fancoil (€)",min_value=0.0,value=float(t.get("target_annuale_hvac",0) or 0),step=1000.0,format="%.2f")
+                q1=c4.number_input("Target Q1 Home + Split + Fancoil (€)",min_value=0.0,value=float(t.get("target_q1_hvac",0) or 0),step=1000.0,format="%.2f")
                 if st.form_submit_button("Salva Target",type="primary"):
                     save_targets(code,super_split,super_aqua,annuale,q1)
                     st.success(f"Target salvati per {info['name']}.")
