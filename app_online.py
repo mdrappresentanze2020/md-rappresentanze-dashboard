@@ -707,10 +707,15 @@ def superpre_page(user):
     split=catalogs[catalogs["Catalogo"].astype(str).str.strip().str.casefold()=="split"]
     aqua=families[families["Famiglia Prodotto"].astype(str).str.contains("aqua",case=False,na=False)]
 
-    # Target H1 fisso: consuntivo Q1 + Q2 già presente nel file cliente.
-    target_split=float((split["Spedito Q1"]+split["Da Spedire Q1"]+split["Spedito Q2"]+split["Da Spedire Q2"]).sum())
-    target_aqua=float((aqua["Spedito Q1"]+aqua["Da Spedire Q1"]+aqua["Spedito Q2"]+aqua["Da Spedire Q2"]).sum())
+    # Target H1 fisso: valore Q1 + Q2 già presente nel file cliente.
+    split_actual_q1=float((split["Spedito Q1"]+split["Da Spedire Q1"]).sum())
+    split_actual_q2=float((split["Spedito Q2"]+split["Da Spedire Q2"]).sum())
+    aqua_actual_q1=float((aqua["Spedito Q1"]+aqua["Da Spedire Q1"]).sum())
+    aqua_actual_q2=float((aqua["Spedito Q2"]+aqua["Da Spedire Q2"]).sum())
+    target_split=split_actual_q1+split_actual_q2
+    target_aqua=aqua_actual_q1+aqua_actual_q2
     targets={"SPLIT":target_split,"AQUA_F":target_aqua}
+    actuals={"SPLIT":{"q1":split_actual_q1,"q2":split_actual_q2},"AQUA_F":{"q1":aqua_actual_q1,"q2":aqua_actual_q2}}
     programs=load_superpre_values(code)
 
     # La programmazione è libera e separata per trimestre.
@@ -737,10 +742,10 @@ def superpre_page(user):
         premio_q1=q1*0.10 if reached else 0.0
         premio_q2=q2*0.05 if reached else 0.0
         premio=premio_q1+premio_q2; total_premio+=premio
-        rows.append({"Famiglia":label,"Target H1 fisso":euro(target),"Programmazione Q1":euro(q1),"Programmazione Q2":euro(q2),"Programmazione totale":euro(programmed),"Target raggiunto":"Sì" if reached else "No","Premio Q1 10%":euro(premio_q1),"Premio Q2 5%":euro(premio_q2),"Premio totale":euro(premio)})
+        rows.append({"Famiglia":label,"Target H1 fisso":euro(target),"Fatto Q1 attuale":euro(actuals[family]["q1"]),"Fatto Q2 fino ad oggi":euro(actuals[family]["q2"]),"Programmazione Q1":euro(q1),"Programmazione Q2":euro(q2),"Programmazione totale":euro(programmed),"Target raggiunto":"Sì" if reached else "No","Premio Q1 10%":euro(premio_q1),"Premio Q2 5%":euro(premio_q2),"Premio totale":euro(premio)})
     st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
     st.metric("Premio Super Pre complessivo stimato",euro(total_premio))
-    st.caption("Il Target H1 è fisso e deriva dai valori Q1 + Q2 presenti nei dati cliente. La programmazione Q1 e Q2 è libera e separata per trimestre.")
+    st.caption("Il Target H1 è fisso e deriva dai valori Q1 + Q2 presenti nei dati cliente. Restano visibili anche il fatto Q1 attuale e il fatto Q2 fino ad oggi. La programmazione Q1 e Q2 è libera e separata per trimestre.")
 
 def ensure_addendum_bonus_table():
     def operation(connection):
