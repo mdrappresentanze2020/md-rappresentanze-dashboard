@@ -655,6 +655,94 @@ def order_pdfs_page():
         st.dataframe(status_df,use_container_width=True,hide_index=True)
     else:
         st.info("Nessun PDF caricato.")
+def ensure_bilico_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS addendum_bilico(customer_code TEXT NOT NULL,line_code TEXT NOT NULL,size_code TEXT NOT NULL,ordered_qty INTEGER NOT NULL DEFAULT 0,extra_discount NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,line_code,size_code))"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def load_bilico(customer_code):
+    ensure_bilico_table()
+    def operation(connection):
+        with connection.session as session:
+            rows=session.execute(text("SELECT line_code,size_code,ordered_qty,extra_discount FROM addendum_bilico WHERE customer_code=:code"),{"code":customer_code}).mappings().all()
+            result={}
+            for r in rows:
+                result[(r["line_code"],r["size_code"])]=int(r["ordered_qty"] or 0)
+                result[(r["line_code"],"EXTRA_DISCOUNT")]=float(r["extra_discount"] or 0)
+            return result
+    return run_db_with_retry(operation)
+
+def save_bilico(customer_code, quantities, discounts):
+    ensure_bilico_table()
+    def operation(connection):
+        with connection.session as session:
+            for (line,size),qty in quantities.items():
+                discount=float(discounts.get(line,0))
+                session.execute(text("""INSERT INTO addendum_bilico(customer_code,line_code,size_code,ordered_qty,extra_discount,updated_at) VALUES(:code,:line,:size,:qty,:discount,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,line_code,size_code) DO UPDATE SET ordered_qty=:qty,extra_discount=:discount,updated_at=CURRENT_TIMESTAMP"""),{"code":customer_code,"line":line,"size":size,"qty":int(qty),"discount":discount})
+            session.commit()
+    return run_db_with_retry(operation)
+
+def bilico_page(user):
+    st.title("Accordi Addendum")
+    st.header("Sconto Bilico 2027")
+    is_admin=user.get("role")=="admin"
+    if is_admin:
+        labels={f"{info['name']} · {code}":code for code,info in CLIENTS.items()}
+        selected=st.selectbox("Cliente",list(labels.keys()),key="bilico_client")
+        code=labels[selected]
+    else:
+        code=user.get("customer_code") or user.get("code")
+        if not code or code not in CLIENTS:
+            st.error("Cliente non associato all'account.");return
+        st.caption(CLIENTS[code]["name"])
+
+    lines={
+      "EZCOOL": {"title":"EZCool (MLA1-Y + ILA1-Y)","sizes":[("27M",234.0),("35M",251.0),("53M",450.0),("70M",549.0)]},
+      "CRISTALLO2": {"title":"CRISTALLO 2 (MMA1-Y + IMA1-Y)","sizes":[("27M",377.0),("35M",397.0),("53M",632.0),("70M",765.0)]},
+    }
+    saved=load_bilico(code)
+    quantities={};discounts={}
+    with st.form(f"bilico_{code}"):
+        for line,info in lines.items():
+            st.subheader(info["title"])
+            cols=st.columns(4)
+            for idx,(size,net) in enumerate(info["sizes"]):
+                with cols[idx]:
+                    st.markdown(f"**{size}**")
+                    st.caption(f"Netto Bilico {euro(net)}")
+                    quantities[(line,size)]=st.number_input("Quantità",min_value=0,step=1,value=int(saved.get((line,size),0)),key=f"bilico_{code}_{line}_{size}")
+            discounts[line]=st.number_input(f"{info['title']} · Extra sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(saved.get((line,"EXTRA_DISCOUNT"),0)),format="%.2f",key=f"bilico_discount_{code}_{line}") if is_admin else float(saved.get((line,"EXTRA_DISCOUNT"),0))
+        save=st.form_submit_button("Salva quantità Bilico",type="primary",use_container_width=True)
+    if save:
+        if is_admin:
+            save_bilico(code,quantities,discounts)
+        else:
+            # Il cliente può aggiornare le quantità, mantenendo invariato l'extra sconto impostato dall'Admin.
+            save_bilico(code,quantities,{line:float(saved.get((line,"EXTRA_DISCOUNT"),0)) for line in lines})
+        st.success("Addendum Bilico aggiornato.");st.rerun()
+
+    grand_total=0.0
+    for line,info in lines.items():
+        rows=[];subtotal=0.0
+        extra=float(saved.get((line,"EXTRA_DISCOUNT"),discounts.get(line,0)))
+        # durante l'editing Admin mostriamo anche il valore corrente del form
+        if is_admin: extra=discounts.get(line,extra)
+        for size,net in info["sizes"]:
+            qty=quantities.get((line,size),int(saved.get((line,size),0)))
+            row_total=qty*net;subtotal+=row_total
+            rows.append({"Taglia":size,"Quantità":qty,"Prezzo netto Bilico":euro(net),"Totale":euro(row_total)})
+        extra_value=subtotal*(extra/100)
+        final=max(subtotal-extra_value,0);grand_total+=final
+        st.subheader(info["title"])
+        st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+        c1,c2,c3=st.columns(3)
+        c1.metric("Subtotale",euro(subtotal))
+        c2.metric("Extra sconto",euro(extra_value),delta=f"{extra:.2f}%".replace(".",","))
+        c3.metric("Totale dopo extra sconto",euro(final))
+    st.metric("Totale complessivo Sconto Bilico",euro(grand_total))
+
 def ensure_superpre_table():
     def operation(connection):
         with connection.session as session:
@@ -996,7 +1084,7 @@ with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
     if st.button("Esci"): st.session_state.user=None;st.rerun()
-    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F"] if user.get("role")=="admin" else ["Dashboard","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F"]
+    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027"] if user.get("role")=="admin" else ["Dashboard","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Aggiorna dati": upload_page();st.stop()
@@ -1006,6 +1094,7 @@ if page=="Gestione PDF conferme": order_pdfs_page();st.stop()
 if page=="Accordi Addendum · Promo EDGE e AQUA": addendum_page(user,"promo");st.stop()
 if page=="Accordi Addendum · EDGE EVO 2.0": addendum_page(user,"evo");st.stop()
 if page=="Accordi Addendum · Super Pre Split e Aqua F": superpre_page(user);st.stop()
+if page=="Accordi Addendum · Sconto Bilico 2027": bilico_page(user);st.stop()
 if user.get("role")=="admin":
     admin_dashboard();st.stop()
 code=str(user.get("customer_code","")).strip().upper()
