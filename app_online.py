@@ -151,6 +151,32 @@ def dataset_status():
     with db_connection().session as session:
         return {r["customer_code"]:r for r in session.execute(text("SELECT customer_code,customer_name,filename,updated_at FROM customer_exports")).mappings().all()}
 
+def ensure_addendum_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS addendum_orders(customer_code TEXT NOT NULL,product_code TEXT NOT NULL,ordered_qty INTEGER NOT NULL DEFAULT 0,list_price NUMERIC NOT NULL DEFAULT 0,promo_price NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,product_code))"""))
+            session.execute(text("ALTER TABLE addendum_orders ADD COLUMN IF NOT EXISTS list_price NUMERIC NOT NULL DEFAULT 0"))
+            session.execute(text("ALTER TABLE addendum_orders ADD COLUMN IF NOT EXISTS promo_price NUMERIC NOT NULL DEFAULT 0"))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def load_addendum_orders(customer_code):
+    ensure_addendum_table()
+    def operation(connection):
+        with connection.session as session:
+            rows = session.execute(text("SELECT product_code,ordered_qty,list_price,promo_price FROM addendum_orders WHERE customer_code=:code"), {"code":customer_code}).mappings().all()
+            return {r["product_code"]: {"qty":int(r["ordered_qty"] or 0),"list_price":float(r["list_price"] or 0),"promo_price":float(r["promo_price"] or 0)} for r in rows}
+    return run_db_with_retry(operation)
+
+def save_addendum_orders(customer_code, values):
+    ensure_addendum_table()
+    def operation(connection):
+        with connection.session as session:
+            for product_code, item in values.items():
+                session.execute(text("""INSERT INTO addendum_orders(customer_code,product_code,ordered_qty,list_price,promo_price,updated_at) VALUES(:code,:product,:qty,:list_price,:promo_price,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,product_code) DO UPDATE SET ordered_qty=:qty,list_price=:list_price,promo_price=:promo_price,updated_at=CURRENT_TIMESTAMP"""), {"code":customer_code,"product":product_code,"qty":int(item["qty"]),"list_price":float(item["list_price"]),"promo_price":float(item["promo_price"])})
+            session.commit()
+    return run_db_with_retry(operation)
+
 def normalize(value):
     if value is None or pd.isna(value): return ""
     return re.sub(r"\s+", " ", str(value).replace("\n", " ")).strip()
@@ -616,6 +642,69 @@ def order_pdfs_page():
         st.dataframe(status_df,use_container_width=True,hide_index=True)
     else:
         st.info("Nessun PDF caricato.")
+def addendum_products():
+    return [
+        ("EDGE_F_2.1-8.1", "EDGE F (R290) · WiSAN-PME 1 S 2.1-8.1", "Lotto minimo 5 · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1"),
+        ("AQUA_F_100-300S", "AQUA F (R290) · DSDH-P AQ 1 S 100-300S", "Lotto minimo 11 · 10 fatturati + 1 omaggio taglia inferiore"),
+        ("WISAN_YME_2.1", "EDGE EVO 2.0 · WiSAN-YME 1S 2.1", ""),
+        ("WISAN_YME_3.1", "EDGE EVO 2.0 · WiSAN-YME 1S 3.1", ""),
+        ("WISAN_YME_4.1", "EDGE EVO 2.0 · WiSAN-YME 1S 4.1", ""),
+        ("WISAN_YME_5.1", "EDGE EVO 2.0 · WiSAN-YME 1S 5.1", ""),
+        ("WISAN_YME_6.1", "EDGE EVO 2.0 · WiSAN-YME 1S 6.1", ""),
+        ("WISAN_YME_6.1T", "EDGE EVO 2.0 · WiSAN-YME 1S 6.1T", ""),
+        ("WISAN_YME_7.1", "EDGE EVO 2.0 · WiSAN-YME 1S 7.1", ""),
+        ("WISAN_YME_7.1T", "EDGE EVO 2.0 · WiSAN-YME 1S 7.1T", ""),
+        ("WISAN_YME_8.1", "EDGE EVO 2.0 · WiSAN-YME 1S 8.1", ""),
+        ("WISAN_YME_8.1T", "EDGE EVO 2.0 · WiSAN-YME 1S 8.1T", ""),
+    ]
+
+def addendum_page(user):
+    st.title("Accordi Addendum")
+    is_admin=user.get("role")=="admin"
+    if is_admin:
+        client_labels={f"{info['name']} · {code}":code for code,info in CLIENTS.items()}
+        selected_label=st.selectbox("Cliente",list(client_labels.keys()),key="addendum_client")
+        selected_code=client_labels[selected_label]
+    else:
+        selected_code=user.get("customer_code") or user.get("code")
+        if not selected_code or selected_code not in CLIENTS:
+            st.error("Cliente non associato all'account.")
+            return
+        st.caption(CLIENTS[selected_code]["name"])
+    saved=load_addendum_orders(selected_code)
+    products=addendum_products()
+    if is_admin:
+        values={}
+        with st.form(f"addendum_form_{selected_code}"):
+            st.subheader("Quantità e prezzi")
+            for code,label,note in products:
+                current=saved.get(code,{})
+                st.markdown(f"**{label}**")
+                if note: st.caption(note)
+                c1,c2,c3=st.columns(3)
+                qty=c1.number_input("Pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{selected_code}_{code}")
+                list_price=c2.number_input("Prezzo di listino (€)",min_value=0.0,step=10.0,value=float(current.get("list_price",0)),format="%.2f",key=f"al_{selected_code}_{code}")
+                promo_price=c3.number_input("Prezzo promo (€)",min_value=0.0,step=10.0,value=float(current.get("promo_price",0)),format="%.2f",key=f"ap_{selected_code}_{code}")
+                values[code]={"qty":qty,"list_price":list_price,"promo_price":promo_price}
+            submitted=st.form_submit_button("Salva Addendum",type="primary",use_container_width=True)
+        if submitted:
+            save_addendum_orders(selected_code,values);st.success("Dati Addendum salvati.");st.rerun()
+    else:
+        rows=[]
+        total_saving=0.0
+        for code,label,note in products:
+            item=saved.get(code,{})
+            qty=int(item.get("qty",0)); lp=float(item.get("list_price",0)); pp=float(item.get("promo_price",0))
+            if qty<=0 and lp<=0 and pp<=0: continue
+            saving=max(lp-pp,0)*qty
+            total_saving+=saving
+            rows.append({"Prodotto":label,"Pezzi ordinati":qty,"Listino unitario":euro(lp),"Promo unitaria":euro(pp),"Risparmio":euro(saving)})
+        if rows:
+            st.metric("Risparmio complessivo stimato",euro(total_saving))
+            st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+        else:
+            st.info("Nessun dato Addendum ancora disponibile.")
+
 def targets_page():
     st.title("Target annuali")
     st.caption("I valori vengono salvati su Neon e restano invariati finché non vengono modificati dall'amministratore.")
@@ -675,13 +764,14 @@ with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
     if st.button("Esci"): st.session_state.user=None;st.rerun()
-    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme"] if user.get("role")=="admin" else ["Dashboard"]
+    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum"] if user.get("role")=="admin" else ["Dashboard","Accordi Addendum"]
     page=st.radio("Sezione",pages)
 
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
 if page=="Gestione PDF conferme": order_pdfs_page();st.stop()
+if page=="Accordi Addendum": addendum_page(user);st.stop()
 if user.get("role")=="admin":
     admin_dashboard();st.stop()
 code=str(user.get("customer_code","")).strip().upper()
