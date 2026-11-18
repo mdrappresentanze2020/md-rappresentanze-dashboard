@@ -770,6 +770,69 @@ def commercial_agreement_page(user):
     st.markdown("**Pre-stagionali:** soglie minime definite per SPLIT, EDGE, HYDRO-SPLIT, AQUA, FANCOILS e SINERGY, calcolate sul 60% dell'anno precedente con minimi specifici.")
     st.caption("I premi sono una stima di dashboard. Restano soggetti alle ulteriori condizioni di riconoscimento previste dall'accordo commerciale.")
 
+def ensure_native_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS addendum_native(customer_code TEXT NOT NULL,size_code TEXT NOT NULL,ordered_qty INTEGER NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,size_code))"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def load_native(customer_code):
+    ensure_native_table()
+    def operation(connection):
+        with connection.session as session:
+            rows=session.execute(text("SELECT size_code,ordered_qty FROM addendum_native WHERE customer_code=:code"),{"code":customer_code}).mappings().all()
+            return {r["size_code"]:int(r["ordered_qty"] or 0) for r in rows}
+    return run_db_with_retry(operation)
+
+def save_native(customer_code, quantities):
+    ensure_native_table()
+    def operation(connection):
+        with connection.session as session:
+            for size,qty in quantities.items():
+                session.execute(text("""INSERT INTO addendum_native(customer_code,size_code,ordered_qty,updated_at) VALUES(:code,:size,:qty,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,size_code) DO UPDATE SET ordered_qty=:qty,updated_at=CURRENT_TIMESTAMP"""),{"code":customer_code,"size":size,"qty":int(qty)})
+            session.commit()
+    return run_db_with_retry(operation)
+
+def native_page(user):
+    st.title("Accordi Addendum")
+    st.header("Addendum NATIVE 2")
+    is_admin=user.get("role")=="admin"
+    if is_admin:
+        labels={f"{info['name']} · {code}":code for code,info in CLIENTS.items()}
+        selected=st.selectbox("Cliente",list(labels.keys()),key="native_client")
+        code=labels[selected]
+    else:
+        code=user.get("customer_code") or user.get("code")
+        if not code or code not in CLIENTS:
+            st.error("Cliente non associato all'account.");return
+        st.caption(CLIENTS[code]["name"])
+    prices=[("27M",213.0),("35M",237.0),("53M",441.0),("70M",537.0)]
+    saved=load_native(code)
+    quantities={}
+    with st.form(f"native_{code}"):
+        cols=st.columns(4)
+        for idx,(size,net) in enumerate(prices):
+            with cols[idx]:
+                st.markdown(f"**NATIVE 2 · {size}**")
+                st.caption(f"Prezzo netto {euro(net)}")
+                quantities[size]=st.number_input("Quantità",min_value=0,step=1,value=int(saved.get(size,0)),key=f"native_qty_{code}_{size}")
+        save=st.form_submit_button("Salva quantità NATIVE 2",type="primary",use_container_width=True)
+    if save:
+        save_native(code,quantities);st.success("Quantità NATIVE 2 aggiornate.");st.rerun()
+    rows=[];total=0.0
+    for size,net in prices:
+        qty=quantities.get(size,int(saved.get(size,0))); line=qty*net;total+=line
+        rows.append({"Taglia":size,"Quantità":qty,"Prezzo netto":euro(net),"Totale":euro(line)})
+    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    st.metric("Totale Addendum NATIVE 2",euro(total))
+    st.divider()
+    st.subheader("Legenda · Note fuori catalogo / listino")
+    st.markdown("- **NATIVE 2 – Set MLA1-Y + IZA1-Y** è inclusa tra le serie prodotto considerate nel catalogo SPLIT ai fini dell'accordo commerciale.")
+    st.markdown("- Il fatturato NATIVE 2 concorre al monte fatturato utile al raggiungimento dei target premiabili **solo per vendite tramite canale distributivo offline**, cioè punti vendita fisici / banco.")
+    st.markdown("- Le vendite effettuate direttamente o indirettamente tramite **e-commerce, piattaforme digitali o marketplace terzi sono escluse** dal monte fatturato utile al calcolo e alla maturazione dei premi.")
+    st.markdown("- Restano confermate e invariate le altre condizioni dell'Accordo Commerciale 2027.")
+
 def ensure_bilico_table():
     def operation(connection):
         with connection.session as session:
@@ -814,7 +877,7 @@ def bilico_page(user):
         st.caption(CLIENTS[code]["name"])
 
     lines={
-      "NATIVE2": {"title":"NATIVE 2 (MLA1-Y + IZA1-Y)","sizes":[("27M",213.0),("35M",237.0),("53M",441.0),("70M",537.0)]},
+      "EZCOOL": {"title":"EZCool (MLA1-Y + ILA1-Y)","sizes":[("27M",234.0),("35M",251.0),("53M",450.0),("70M",549.0)]},
       "CRISTALLO2": {"title":"CRISTALLO 2 (MMA1-Y + IMA1-Y)","sizes":[("27M",377.0),("35M",397.0),("53M",632.0),("70M",765.0)]},
     }
     saved=load_bilico(code)
@@ -858,12 +921,6 @@ def bilico_page(user):
         c3.metric("Totale dopo extra sconto",euro(final))
     st.metric("Totale complessivo Sconto Bilico",euro(grand_total))
 
-    st.divider()
-    st.subheader("Legenda · NATIVE 2 fuori catalogo / listino")
-    st.markdown("- **NATIVE 2 – Set MLA1-Y + IZA1-Y** è inclusa tra le serie prodotto considerate nel catalogo SPLIT ai fini dell'accordo commerciale.")
-    st.markdown("- Il fatturato NATIVE 2 concorre al monte fatturato utile al raggiungimento dei target premiabili **solo per vendite tramite canale distributivo offline**, cioè punti vendita fisici / banco.")
-    st.markdown("- Le vendite effettuate direttamente o indirettamente tramite **e-commerce, piattaforme digitali o marketplace terzi sono escluse** dal monte fatturato utile al calcolo e alla maturazione dei premi.")
-    st.markdown("- Restano confermate e invariate le altre condizioni dell'Accordo Commerciale 2027.")
 
 def ensure_superpre_table():
     def operation(connection):
@@ -1206,7 +1263,7 @@ with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
     if st.button("Esci"): st.session_state.user=None;st.rerun()
-    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · Accordo Commerciale 2027"]
+    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Aggiorna dati": upload_page();st.stop()
@@ -1217,6 +1274,7 @@ if page=="Accordi Addendum · Promo EDGE e AQUA": addendum_page(user,"promo");st
 if page=="Accordi Addendum · EDGE EVO 2.0": addendum_page(user,"evo");st.stop()
 if page=="Accordi Addendum · Super Pre Split e Aqua F": superpre_page(user);st.stop()
 if page=="Accordi Addendum · Sconto Bilico 2027": bilico_page(user);st.stop()
+if page=="Accordi Addendum · NATIVE 2": native_page(user);st.stop()
 if page=="Accordi Addendum · Accordo Commerciale 2027": commercial_agreement_page(user);st.stop()
 if user.get("role")=="admin":
     admin_dashboard();st.stop()
