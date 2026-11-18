@@ -274,84 +274,72 @@ def dashboard(data, code, name):
     for col in summary.columns[1:]: summary[col] = summary[col].map(euro)
     st.dataframe(summary, use_container_width=True, hide_index=True)
 
-    st.subheader("Dettaglio famiglie prodotto")
-    selected = st.selectbox("Catalogo", catalogs["Catalogo"].tolist())
-    family_view = families[families["Catalogo"] == selected][["Famiglia Prodotto","Spedito Q1","Spedito Q2","Spedito Q3","Spedito Q4","Spedito Totale","Da Spedire Q1","Da Spedire Q2","Da Spedire Q3","Da Spedire Q4","Da Spedire Totale","Totale Complessivo"]].copy()
-    for col in family_view.columns[1:]: family_view[col] = family_view[col].map(euro)
-    st.dataframe(family_view, use_container_width=True, hide_index=True)
+    st.subheader("Prodotti e conferme ordine")
     orders = data[data["Livello"] == "order"].copy()
     ranges = data[data["Livello"] == "range"].copy()
-    if not orders.empty:
-        st.subheader("Conferme ordine")
-        order_options = orders["Numero Ordine"].dropna().astype(str).tolist()
-        selected_order = st.selectbox("Seleziona conferma ordine", order_options, key=f"order_selector_{code}")
-        selected_row = orders[orders["Numero Ordine"] == selected_order].iloc[0]
 
+    catalog_options = catalogs["Catalogo"].dropna().astype(str).tolist()
+    selected_catalog = st.selectbox("Filtra per catalogo", catalog_options, key=f"catalog_summary_{code}")
+
+    family_rows = ranges[ranges["Catalogo"] == selected_catalog].copy()
+    if family_rows.empty:
+        family_summary = families[families["Catalogo"] == selected_catalog][["Famiglia Prodotto","Spedito Totale","Da Spedire Totale","Totale Complessivo"]].copy()
+    else:
+        family_summary = family_rows.groupby("Famiglia Prodotto", as_index=False).agg({
+            "Spedito Totale":"sum",
+            "Da Spedire Totale":"sum",
+            "Totale Complessivo":"sum"
+        })
+
+    if not family_summary.empty:
+        family_summary = family_summary.sort_values("Totale Complessivo", ascending=False)
+        family_display = family_summary.copy()
+        for col in ["Spedito Totale","Da Spedire Totale","Totale Complessivo"]:
+            family_display[col] = family_display[col].map(euro)
+        st.dataframe(family_display, use_container_width=True, hide_index=True)
+
+    if not orders.empty:
+        catalog_orders = orders[orders["Catalogo"] == selected_catalog].copy()
+        st.markdown("**Conferme ordine del catalogo selezionato**")
+        order_table = catalog_orders[["Numero Ordine","Spedito Totale","Da Spedire Totale","Totale Complessivo"]].copy()
+        order_table = order_table.sort_values("Totale Complessivo", ascending=False)
+        for col in ["Spedito Totale","Da Spedire Totale","Totale Complessivo"]:
+            order_table[col] = order_table[col].map(euro)
+        st.dataframe(order_table, use_container_width=True, hide_index=True)
+
+        st.markdown("**Dettaglio conferma ordine**")
+        order_options = catalog_orders["Numero Ordine"].dropna().astype(str).tolist()
+        selected_order = st.selectbox("Seleziona conferma ordine", order_options, key=f"order_selector_{code}_{selected_catalog}")
+        selected_row = catalog_orders[catalog_orders["Numero Ordine"] == selected_order].iloc[0]
         o1,o2,o3 = st.columns(3)
         o1.metric("Numero ordine", selected_order)
-        o2.metric("Catalogo", selected_row["Catalogo"])
+        o2.metric("Catalogo", selected_catalog)
         o3.metric("Totale ordine", euro(selected_row["Totale Complessivo"]))
 
-        order_quarters = pd.DataFrame({
-            "Trimestre": ["Q1","Q2","Q3","Q4"],
-            "Spedito": [selected_row[f"Spedito Q{i}"] for i in range(1,5)],
-            "Da Spedire": [selected_row[f"Da Spedire Q{i}"] for i in range(1,5)]
-        })
-        fig_order = go.Figure()
-        fig_order.add_bar(name="Spedito", x=order_quarters["Trimestre"], y=order_quarters["Spedito"], marker_color="#4F8FC5")
-        fig_order.add_bar(name="Da Spedire", x=order_quarters["Trimestre"], y=order_quarters["Da Spedire"], marker_color="#D6E86B")
-        fig_order.update_layout(barmode="stack",height=290,paper_bgcolor="white",plot_bgcolor="white",legend=dict(orientation="h",font=dict(color="#202124")),margin=dict(l=20,r=10,t=15,b=20),xaxis=dict(showgrid=False,tickfont=dict(color="#202124")),yaxis=dict(gridcolor="#e5e7eb",tickfont=dict(color="#4b5563"),title="Euro"))
-        st.plotly_chart(fig_order, use_container_width=True)
-
-        selected_families = data[(data["Livello"] == "family") & (data["Numero Ordine"] == selected_order)].copy()
         selected_ranges = ranges[ranges["Numero Ordine"] == selected_order].copy()
-
-        if not selected_families.empty:
-            st.markdown("**Dettaglio famiglia prodotto**")
-            family_table = selected_families[["Famiglia Prodotto","Spedito Totale","Da Spedire Totale","Totale Complessivo"]].copy()
-            for col in ["Spedito Totale","Da Spedire Totale","Totale Complessivo"]:
-                family_table[col] = family_table[col].map(euro)
-            st.dataframe(family_table, use_container_width=True, hide_index=True)
-
         if not selected_ranges.empty:
-            st.markdown("**Dettaglio Range**")
-            family_choices = selected_ranges["Famiglia Prodotto"].dropna().unique().tolist()
-            selected_family = st.selectbox("Famiglia prodotto ordine", family_choices, key=f"order_family_{code}_{selected_order}")
-            family_ranges = selected_ranges[selected_ranges["Famiglia Prodotto"] == selected_family].copy()
-            range_options = family_ranges["Range"].dropna().astype(str).tolist()
-            selected_range = st.selectbox("Range", range_options, key=f"range_selector_{code}_{selected_order}_{selected_family}")
-            range_row = family_ranges[family_ranges["Range"] == selected_range].iloc[0]
-            r1,r2,r3,r4 = st.columns(4)
-            r1.metric("Range", selected_range)
-            r2.metric("Spedito Range", euro(range_row["Spedito Totale"]))
-            r3.metric("Da Spedire Range", euro(range_row["Da Spedire Totale"]))
-            r4.metric("Totale Range", euro(range_row["Totale Complessivo"]))
-            range_table = family_ranges[["Range","Spedito Q1","Spedito Q2","Spedito Q3","Spedito Q4","Spedito Totale","Da Spedire Q1","Da Spedire Q2","Da Spedire Q3","Da Spedire Q4","Da Spedire Totale","Totale Complessivo"]].copy()
-            for col in range_table.columns[1:]:
-                range_table[col] = range_table[col].map(euro)
-            st.dataframe(range_table, use_container_width=True, hide_index=True)
-
-        with st.expander("Elenco completo conferme ordine"):
-            catalog_filter = st.multiselect("Filtra per catalogo", sorted(orders["Catalogo"].dropna().unique().tolist()))
-            only_pending = st.checkbox("Mostra solo ordini con valore Da Spedire")
-            filtered_orders = orders.copy()
-            if catalog_filter:
-                filtered_orders = filtered_orders[filtered_orders["Catalogo"].isin(catalog_filter)]
-            if only_pending:
-                filtered_orders = filtered_orders[filtered_orders["Da Spedire Totale"] > 0]
-            order_table = filtered_orders[["Numero Ordine","Catalogo","Spedito Totale","Da Spedire Totale","Totale Complessivo"]].copy()
+            range_summary = selected_ranges.groupby(["Famiglia Prodotto","Range"], as_index=False).agg({
+                "Spedito Totale":"sum",
+                "Da Spedire Totale":"sum",
+                "Totale Complessivo":"sum"
+            })
+            range_display = range_summary.copy()
             for col in ["Spedito Totale","Da Spedire Totale","Totale Complessivo"]:
-                order_table[col] = order_table[col].map(euro)
-            st.dataframe(order_table, use_container_width=True, hide_index=True)
+                range_display[col] = range_display[col].map(euro)
+            st.dataframe(range_display, use_container_width=True, hide_index=True)
 
-        with st.expander("Elenco completo righe Range"):
-            full_ranges = ranges[["Numero Ordine","Catalogo","Famiglia Prodotto","Range","Spedito Totale","Da Spedire Totale","Totale Complessivo"]].copy()
-            range_filter = st.multiselect("Filtra Range", sorted(full_ranges["Range"].dropna().unique().tolist()))
-            if range_filter:
-                full_ranges = full_ranges[full_ranges["Range"].isin(range_filter)]
-            for col in ["Spedito Totale","Da Spedire Totale","Totale Complessivo"]:
-                full_ranges[col] = full_ranges[col].map(euro)
-            st.dataframe(full_ranges, use_container_width=True, hide_index=True)
+        with st.expander("Dettaglio trimestrale della conferma"):
+            quarter_table = pd.DataFrame({
+                "Voce":["Spedito","Da Spedire","Totale"],
+                "Q1":[selected_row["Spedito Q1"],selected_row["Da Spedire Q1"],selected_row["Spedito Q1"]+selected_row["Da Spedire Q1"]],
+                "Q2":[selected_row["Spedito Q2"],selected_row["Da Spedire Q2"],selected_row["Spedito Q2"]+selected_row["Da Spedire Q2"]],
+                "Q3":[selected_row["Spedito Q3"],selected_row["Da Spedire Q3"],selected_row["Spedito Q3"]+selected_row["Da Spedire Q3"]],
+                "Q4":[selected_row["Spedito Q4"],selected_row["Da Spedire Q4"],selected_row["Spedito Q4"]+selected_row["Da Spedire Q4"]],
+                "Totale":[selected_row["Spedito Totale"],selected_row["Da Spedire Totale"],selected_row["Totale Complessivo"]]
+            })
+            for col in ["Q1","Q2","Q3","Q4","Totale"]:
+                quarter_table[col] = quarter_table[col].map(euro)
+            st.dataframe(quarter_table, use_container_width=True, hide_index=True)
 
 def admin_dashboard():
     st.title("Cruscotto generale MD Rappresentanze")
