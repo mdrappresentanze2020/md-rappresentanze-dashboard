@@ -28,6 +28,9 @@ st.markdown("""<style>
 .stMetric{background:#fff!important;border:1px solid #d7dde5;border-radius:14px;padding:14px}
 [data-testid="stMetricLabel"] p{color:#3f4854!important;font-weight:700}
 [data-testid="stMetricValue"]{color:#4F8FC5!important}
+/* Testi dashboard sempre visibili su sfondo chiaro */
+[data-testid="stMain"] h1,[data-testid="stMain"] h2,[data-testid="stMain"] h3,[data-testid="stMain"] p,[data-testid="stMain"] strong{color:#202124!important}
+[data-testid="stExpander"] summary,[data-testid="stExpander"] summary *{color:#202124!important;font-weight:700!important}
 /* Login: etichette e testo digitato sempre neri */
 [data-testid="stForm"] label p{color:#000000!important;font-weight:700!important}
 [data-testid="stForm"] input{color:#000000!important;background:#ffffff!important;-webkit-text-fill-color:#000000!important}
@@ -356,7 +359,7 @@ def dashboard(data, code, name):
         )
 
     catalog_orders = orders[orders["Catalogo"] == selected_catalog].copy()
-    order_options = catalog_orders["Numero Ordine"].dropna().astype(str).tolist()
+    order_options = sorted(catalog_orders["Numero Ordine"].dropna().astype(str).unique().tolist(), key=lambda x: (re.sub(r"\D", "", x) == "", int(re.sub(r"\D", "", x) or 0), x))
 
     with filter_col2:
         if order_options:
@@ -432,18 +435,17 @@ def dashboard(data, code, name):
 
         ddt_documents, ddt_error = load_google_ddt(code, selected_order)
         if ddt_documents:
-            st.markdown("**Documenti di trasporto disponibili**")
-            ddt_columns = st.columns(min(len(ddt_documents), 3))
             for index, document in enumerate(ddt_documents):
-                with ddt_columns[index % len(ddt_columns)]:
-                    st.download_button(
-                        f"Apri / Scarica DDT {index + 1}",
-                        data=document["content"],
-                        file_name=document["filename"],
-                        mime="application/pdf",
-                        key=f"download_ddt_{code}_{selected_order}_{index}",
-                        use_container_width=True
-                    )
+                label = "Apri / Scarica DDT" if len(ddt_documents) == 1 else f"Apri / Scarica DDT {index + 1}"
+                st.download_button(
+                    label,
+                    data=document["content"],
+                    file_name=document["filename"],
+                    mime="application/pdf",
+                    key=f"download_ddt_{code}_{selected_order}_{index}",
+                    type="primary"
+                )
+                st.caption("Documento disponibile da: Google Drive")
         elif ddt_error:
             st.warning(ddt_error)
         else:
