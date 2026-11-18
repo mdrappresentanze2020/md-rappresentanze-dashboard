@@ -698,7 +698,10 @@ def superpre_page(user):
     if not record:
         st.info("Dati cliente non disponibili.")
         return
-    data=read_export(io.BytesIO(bytes(record["content"])))
+    # Il file salvato su Neon contiene l'Export originale; read_export restituisce
+    # una coppia: (dataframe elaborato, metadati cliente).
+    parsed=read_export(io.BytesIO(bytes(record["content"])))
+    data=parsed[0] if isinstance(parsed, tuple) else parsed
     catalogs=data[data["Livello"]=="catalog"].copy()
     families=data[data["Livello"]=="family"].copy()
     split=catalogs[catalogs["Catalogo"].astype(str).str.strip().str.casefold()=="split"]
