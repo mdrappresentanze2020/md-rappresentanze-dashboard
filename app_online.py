@@ -718,81 +718,157 @@ def addendum_page(user):
             st.error("Cliente non associato all'account.")
             return
         st.caption(CLIENTS[selected_code]["name"])
+
     saved=load_addendum_orders(selected_code)
+    bonus_saved=load_addendum_bonus(selected_code)
     products=addendum_products()
+    edge_products=[p for p in products if p[0].startswith("EDGE_F_")]
+    aqua_products=[p for p in products if p[0].startswith("AQUA_F_")]
+    evo_products=[p for p in products if p[0].startswith("WISAN_YME_")]
+
+    st.markdown("### Sezione Addendum")
+    addendum_section = st.radio(
+        "Seleziona accordo",
+        ["Addendum Promo EDGE e AQUA", "Addendum EDGE EVO 2.0"],
+        horizontal=True,
+        key=f"addendum_section_{selected_code}",
+        label_visibility="collapsed"
+    )
+
     if is_admin:
         values={}
+        family_totals={}
         with st.form(f"addendum_form_{selected_code}"):
-            st.subheader("Quantità e prezzi netti")
-            for code,label,note,default_promo in products:
+            st.subheader("Addendum Promo EDGE e AQUA")
+            st.subheader("EDGE F")
+            st.caption("Lotto promo: minimo 5 pezzi complessivi misti · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1. La regola si ripete per ogni multiplo di 5.")
+            edge_rows=[]
+            for code,label,note,default_net in edge_products:
                 current=saved.get(code,{})
-                st.markdown(f"**{label}**")
-                if note: st.caption(note)
-                is_evo = code.startswith("WISAN_YME_")
-                if is_evo:
-                    c1,c2,c3,c4=st.columns(4)
-                else:
-                    c1,c2=st.columns([1,2])
-                qty=c1.number_input("Pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{selected_code}_{code}")
-                net_saved=float(current.get("promo_price",0)); net_default=net_saved if net_saved>0 else float(default_promo)
-                net_price=c2.number_input("Prezzo netto (€)",min_value=0.0,step=10.0,value=net_default,format="%.2f",key=f"an_{selected_code}_{code}")
-                quantity_discount=0.0
-                if is_evo:
-                    quantity_discount=c3.number_input("Sconto quantità (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(current.get("quantity_discount",0)),format="%.2f",key=f"ad_{selected_code}_{code}")
-                    evo_total=qty*net_price*(1-(quantity_discount/100))
-                    c4.metric("Totale",euro(evo_total))
-                values[code]={"qty":qty,"list_price":0.0,"promo_price":net_price,"gift_value":0.0,"quantity_discount":quantity_discount}
+                c1,c2=st.columns([2,1])
+                qty=c1.number_input(f"{label} · pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{selected_code}_{code}")
+                net=c2.number_input(f"{label} · prezzo netto (€)",min_value=0.0,step=10.0,value=float(current.get("promo_price",0)) or float(default_net),format="%.2f",key=f"an_{selected_code}_{code}")
+                total=qty*net
+                values[code]={"qty":qty,"list_price":0.0,"promo_price":net,"gift_value":0.0,"quantity_discount":0.0}
+                edge_rows.append({"Modello":label.replace("EDGE F (R290) · ",""),"Quantità":qty,"Prezzo netto":euro(net),"Totale":euro(total)})
+            edge_qty=sum(values[p[0]]["qty"] for p in edge_products)
+            edge_order_total=sum(values[p[0]]["qty"]*values[p[0]]["promo_price"] for p in edge_products)
+            edge_gifts=edge_qty//5
+            edge_gift_net=st.number_input("Valore netto unitario omaggio EDGE F 4.1 (€)",min_value=0.0,step=10.0,value=float(bonus_saved.get("EDGE_F",{}).get("net",0)),format="%.2f",key=f"edge_gift_{selected_code}")
+            edge_gift_value=edge_gifts*edge_gift_net
+            edge_discounted=max(edge_order_total-edge_gift_value,0)
+            e1,e2,e3,e4=st.columns(4)
+            e1.metric("Pezzi ordinati",edge_qty)
+            e2.metric("Totale ordine",euro(edge_order_total))
+            e3.metric("Valore omaggio automatico",euro(edge_gift_value),delta=f"{edge_gifts} omaggi")
+            e4.metric("Totale scontato",euro(edge_discounted))
+            st.dataframe(pd.DataFrame(edge_rows),use_container_width=True,hide_index=True)
+
+            st.subheader("AQUA F")
+            st.caption("Lotto promo: minimo 11 pezzi complessivi misti · 10 fatturati + 1 omaggio di taglia inferiore. La regola si ripete per ogni multiplo di 11.")
+            aqua_rows=[]
+            for code,label,note,default_net in aqua_products:
+                current=saved.get(code,{})
+                c1,c2=st.columns([2,1])
+                qty=c1.number_input(f"{label} · pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{selected_code}_{code}")
+                net=c2.number_input(f"{label} · prezzo netto (€)",min_value=0.0,step=10.0,value=float(current.get("promo_price",0)) or float(default_net),format="%.2f",key=f"an_{selected_code}_{code}")
+                total=qty*net
+                values[code]={"qty":qty,"list_price":0.0,"promo_price":net,"gift_value":0.0,"quantity_discount":0.0}
+                aqua_rows.append({"Modello":label.replace("AQUA F (R290) · ",""),"Quantità":qty,"Prezzo netto":euro(net),"Totale":euro(total)})
+            aqua_qty=sum(values[p[0]]["qty"] for p in aqua_products)
+            aqua_order_total=sum(values[p[0]]["qty"]*values[p[0]]["promo_price"] for p in aqua_products)
+            aqua_gifts=aqua_qty//11
+            aqua_gift_net=st.number_input("Valore netto unitario omaggio AQUA F (€)",min_value=0.0,step=10.0,value=float(bonus_saved.get("AQUA_F",{}).get("net",0)),format="%.2f",key=f"aqua_gift_{selected_code}")
+            aqua_gift_value=aqua_gifts*aqua_gift_net
+            aqua_discounted=max(aqua_order_total-aqua_gift_value,0)
+            a1,a2,a3,a4=st.columns(4)
+            a1.metric("Pezzi ordinati",aqua_qty)
+            a2.metric("Totale ordine",euro(aqua_order_total))
+            a3.metric("Valore omaggio automatico",euro(aqua_gift_value),delta=f"{aqua_gifts} omaggi")
+            a4.metric("Totale scontato",euro(aqua_discounted))
+            st.dataframe(pd.DataFrame(aqua_rows),use_container_width=True,hide_index=True)
+
+            st.divider()
+            st.subheader("Addendum EDGE EVO 2.0")
+            st.caption("Prezzi netti Addendum · lo sconto quantità è cumulativo sull'intero ordine EDGE EVO 2.0.")
+            evo_rows=[]
+            evo_subtotal=0.0
+            previous_discounts=[]
+            for code,label,note,default_net in evo_products:
+                current=saved.get(code,{})
+                c1,c2,c3=st.columns(3)
+                qty=c1.number_input(f"{label} · quantità",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{selected_code}_{code}")
+                net_saved=float(current.get("promo_price",0)); net=net_saved if net_saved>0 else float(default_net)
+                c2.metric("Prezzo netto",euro(net))
+                row_subtotal=qty*net
+                c3.metric("Subtotale",euro(row_subtotal))
+                evo_subtotal+=row_subtotal
+                previous_discounts.append(float(current.get("quantity_discount",0)))
+                values[code]={"qty":qty,"list_price":0.0,"promo_price":net,"gift_value":0.0,"quantity_discount":0.0}
+                evo_rows.append({"Modello":label.replace("EDGE EVO 2.0 · ",""),"Quantità":qty,"Prezzo netto":euro(net),"Subtotale":euro(row_subtotal)})
+            previous_discount=max(previous_discounts or [0.0])
+            evo_discount=st.number_input("Sconto quantità cumulativo EDGE EVO 2.0 (%)",min_value=0.0,max_value=100.0,step=0.5,value=previous_discount,format="%.2f",key=f"evo_discount_{selected_code}")
+            evo_discount_value=evo_subtotal*(evo_discount/100)
+            evo_total=evo_subtotal-evo_discount_value
+            for code,_,_,_ in evo_products:
+                values[code]["quantity_discount"]=evo_discount
+            v1,v2,v3=st.columns(3)
+            v1.metric("Subtotale EDGE EVO 2.0",euro(evo_subtotal))
+            v2.metric("Sconto quantità",euro(evo_discount_value),delta=f"{evo_discount:.2f}%".replace(".",","))
+            v3.metric("Totale EDGE EVO 2.0",euro(evo_total))
+            st.dataframe(pd.DataFrame(evo_rows),use_container_width=True,hide_index=True)
+
             submitted=st.form_submit_button("Salva Addendum",type="primary",use_container_width=True)
         if submitted:
-            save_addendum_orders(selected_code,values);st.success("Dati Addendum salvati.");st.rerun()
-
-        bonus_saved=load_addendum_bonus(selected_code)
-        with st.form(f"addendum_bonus_{selected_code}"):
-            st.subheader("Promo per lotti misti")
-            b1,b2=st.columns(2)
-            edge_qty=b1.number_input("EDGE F · quantità omaggi maturati",min_value=0,step=1,value=int(bonus_saved.get("EDGE_F",{}).get("qty",0)),help="1 omaggio ogni 5 pezzi misti ordinati; multipli di 5 maturano più omaggi.")
-            edge_net=b2.number_input("EDGE F · valore netto unitario omaggio (€)",min_value=0.0,step=10.0,value=float(bonus_saved.get("EDGE_F",{}).get("net",0)),format="%.2f")
-            a1,a2=st.columns(2)
-            aqua_qty=a1.number_input("AQUA F · quantità omaggi maturati",min_value=0,step=1,value=int(bonus_saved.get("AQUA_F",{}).get("qty",0)),help="1 omaggio ogni 11 pezzi misti ordinati; multipli di 11 maturano più omaggi.")
-            aqua_net=a2.number_input("AQUA F · valore netto unitario omaggio (€)",min_value=0.0,step=10.0,value=float(bonus_saved.get("AQUA_F",{}).get("net",0)),format="%.2f")
-            save_bonus=st.form_submit_button("Salva valori promo",type="primary",use_container_width=True)
-        if save_bonus:
-            save_addendum_bonus(selected_code,{"EDGE_F":{"qty":edge_qty,"net":edge_net},"AQUA_F":{"qty":aqua_qty,"net":aqua_net}});st.success("Valori promo salvati.");st.rerun()
+            save_addendum_orders(selected_code,values)
+            save_addendum_bonus(selected_code,{"EDGE_F":{"qty":edge_gifts,"net":edge_gift_net},"AQUA_F":{"qty":aqua_gifts,"net":aqua_gift_net}})
+            st.success("Dati Addendum salvati.")
+            st.rerun()
     else:
-        rows=[]
-        total_net=0.0
-        for code,label,note,default_promo in products:
+        def customer_family_table(title, family_products, threshold, gift_label, bonus_key):
+            rows=[]; order_total=0.0; total_qty=0
+            for code,label,note,default_net in family_products:
+                item=saved.get(code,{})
+                qty=int(item.get("qty",0)); net=float(item.get("promo_price",0)) or float(default_net)
+                if qty<=0 and net<=0: continue
+                total=qty*net; order_total+=total; total_qty+=qty
+                rows.append({"Modello":label.split("·",1)[-1].strip(),"Quantità":qty,"Prezzo netto":euro(net),"Totale":euro(total)})
+            bonus=bonus_saved.get(bonus_key,{})
+            gifts=total_qty//threshold
+            gift_net=float(bonus.get("net",0))
+            gift_value=gifts*gift_net
+            discounted=max(order_total-gift_value,0)
+            st.subheader(title)
+            c1,c2,c3,c4=st.columns(4)
+            c1.metric("Pezzi ordinati",total_qty)
+            c2.metric("Totale ordine",euro(order_total))
+            c3.metric("Valore omaggio automatico",euro(gift_value),delta=f"{gifts} omaggi")
+            c4.metric("Totale scontato",euro(discounted))
+            if rows: st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+            return discounted
+
+        st.subheader("Addendum Promo EDGE e AQUA")
+        edge_total=customer_family_table("EDGE F",edge_products,5,"WiSAN-PME 1S 4.1","EDGE_F")
+        aqua_total=customer_family_table("AQUA F",aqua_products,11,"Taglia inferiore","AQUA_F")
+        evo_rows=[]; evo_subtotal=0.0; evo_discounts=[]
+        for code,label,note,default_net in evo_products:
             item=saved.get(code,{})
-            qty=int(item.get("qty",0)); net=float(item.get("promo_price",0)) or float(default_promo); discount=float(item.get("quantity_discount",0))
+            qty=int(item.get("qty",0)); net=float(item.get("promo_price",0)) or float(default_net)
             if qty<=0 and net<=0: continue
-            row_total=qty*net*(1-(discount/100))
-            total_net+=row_total
-            row={"Prodotto":label,"Pezzi ordinati":qty,"Prezzo netto":euro(net),"Totale":euro(row_total)}
-            if code.startswith("WISAN_YME_"):
-                row["Sconto quantità"]=f"{discount:.2f}%".replace(".",",")
-            else:
-                row["Sconto quantità"]=""
-            rows.append(row)
-        bonus=load_addendum_bonus(selected_code)
-        edge_bonus=bonus.get("EDGE_F",{}); aqua_bonus=bonus.get("AQUA_F",{})
-        edge_value=int(edge_bonus.get("qty",0))*float(edge_bonus.get("net",0))
-        aqua_value=int(aqua_bonus.get("qty",0))*float(aqua_bonus.get("net",0))
-        promo_value=edge_value+aqua_value
-        final_total=max(total_net-promo_value,0)
-        c1,c2,c3=st.columns(3)
-        c1.metric("Totale netto prodotti",euro(total_net))
-        c2.metric("Valore promo / omaggi",euro(promo_value))
-        c3.metric("Totale netto dopo promo",euro(final_total))
-        if rows:
-            st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
-        if promo_value>0:
-            promo_rows=[]
-            if edge_value>0: promo_rows.append({"Promo":"EDGE F · 1 omaggio ogni 5 pezzi misti","Quantità omaggi":int(edge_bonus.get("qty",0)),"Valore netto unitario":euro(float(edge_bonus.get("net",0))),"Valore detratto":euro(edge_value)})
-            if aqua_value>0: promo_rows.append({"Promo":"AQUA F · 1 omaggio ogni 11 pezzi misti","Quantità omaggi":int(aqua_bonus.get("qty",0)),"Valore netto unitario":euro(float(aqua_bonus.get("net",0))),"Valore detratto":euro(aqua_value)})
-            st.subheader("Vantaggio promozionale")
-            st.dataframe(pd.DataFrame(promo_rows),use_container_width=True,hide_index=True)
-        if not rows:
-            st.info("Nessun dato Addendum ancora disponibile.")
+            subtotal=qty*net; evo_subtotal+=subtotal
+            evo_discounts.append(float(item.get("quantity_discount",0)))
+            evo_rows.append({"Modello":label.replace("EDGE EVO 2.0 · ",""),"Quantità":qty,"Prezzo netto":euro(net),"Subtotale":euro(subtotal)})
+        evo_discount=max(evo_discounts or [0.0])
+        evo_discount_value=evo_subtotal*(evo_discount/100)
+        evo_total=evo_subtotal-evo_discount_value
+        st.divider()
+        st.subheader("Addendum EDGE EVO 2.0")
+        if evo_rows: st.dataframe(pd.DataFrame(evo_rows),use_container_width=True,hide_index=True)
+        v1,v2,v3=st.columns(3)
+        v1.metric("Subtotale",euro(evo_subtotal))
+        v2.metric("Sconto quantità cumulativo",euro(evo_discount_value),delta=f"{evo_discount:.2f}%".replace(".",","))
+        v3.metric("Totale EDGE EVO 2.0",euro(evo_total))
+        st.metric("Totale complessivo Addendum",euro(edge_total+aqua_total+evo_total))
 
 def targets_page():
     st.title("Target annuali")
