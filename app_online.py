@@ -11,6 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 st.set_page_config(page_title="MD Rappresentanze | Clienti", page_icon="📊", layout="wide")
 st.markdown("""<style>
@@ -52,11 +53,26 @@ def authenticate(username, password):
     if not user: return None
     return user if hmac.compare_digest(password_hash(password), str(user.get("password_sha256", ""))) else None
 
-def db_connection(): return st.connection("postgresql", type="sql")
+def db_connection():
+    return st.connection("postgresql", type="sql")
+
+def run_db_with_retry(operation):
+    connection = db_connection()
+    try:
+        return operation(connection)
+    except OperationalError:
+        # Neon può sospendere il compute o chiudere una connessione inattiva.
+        # Reset elimina il pool non più valido e il secondo tentativo apre
+        # una connessione nuova, evitando l'errore al primo accesso.
+        connection.reset()
+        return operation(db_connection())
+
 def ensure_table():
-    with db_connection().session as session:
-        session.execute(text("""CREATE TABLE IF NOT EXISTS customer_exports(customer_code TEXT PRIMARY KEY,customer_name TEXT NOT NULL,filename TEXT NOT NULL,content BYTEA NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
-        session.commit()
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS customer_exports(customer_code TEXT PRIMARY KEY,customer_name TEXT NOT NULL,filename TEXT NOT NULL,content BYTEA NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+            session.commit()
+    return run_db_with_retry(operation)
 def ensure_targets_table():
     with db_connection().session as session:
         session.execute(text("""CREATE TABLE IF NOT EXISTS customer_targets(customer_code TEXT PRIMARY KEY,super_pre_split NUMERIC NOT NULL DEFAULT 0,super_pre_aqua NUMERIC NOT NULL DEFAULT 0,target_annuale_hvac NUMERIC NOT NULL DEFAULT 0,target_q1_hvac NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
@@ -126,12 +142,17 @@ def save_file(code, name, filename, content):
         session.commit()
 def load_file(code):
     ensure_table()
-    with db_connection().session as session:
-        return session.execute(text("SELECT customer_name,filename,content,updated_at FROM customer_exports WHERE customer_code=:code"), {"code":code}).mappings().first()
+    def operation(connection):
+        with connection.session as session:
+            return session.execute(text("SELECT customer_name,filename,content,updated_at FROM customer_exports WHERE customer_code=:code"), {"code":code}).mappings().first()
+    return run_db_with_retry(operation)
 def dataset_status():
     ensure_table()
-    with db_connection().session as session:
-        return {r["customer_code"]:r for r in session.execute(text("SELECT customer_code,customer_name,filename,updated_at FROM customer_exports")).mappings().all()}
+    def operation(connection):
+        with connection.session as session:
+            rows = session.execute(text("SELECT customer_code,customer_name,filename,updated_at FROM customer_exports")).mappings().all()
+            return {r["customer_code"]:r for r in rows}
+    return run_db_with_retry(operation)
 
 def normalize(value):
     if value is None or pd.isna(value): return ""
