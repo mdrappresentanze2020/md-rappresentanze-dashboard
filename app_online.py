@@ -11,7 +11,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
 
 st.set_page_config(page_title="MD Rappresentanze | Clienti", page_icon="📊", layout="wide")
 st.markdown("""<style>
@@ -53,26 +52,11 @@ def authenticate(username, password):
     if not user: return None
     return user if hmac.compare_digest(password_hash(password), str(user.get("password_sha256", ""))) else None
 
-def db_connection():
-    return st.connection("postgresql", type="sql")
-
-def run_db_with_retry(operation):
-    connection = db_connection()
-    try:
-        return operation(connection)
-    except OperationalError:
-        # Neon può sospendere il compute o chiudere una connessione inattiva.
-        # Reset elimina il pool non più valido e il secondo tentativo apre
-        # una connessione nuova, evitando l'errore al primo accesso.
-        connection.reset()
-        return operation(db_connection())
-
+def db_connection(): return st.connection("postgresql", type="sql")
 def ensure_table():
-    def operation(connection):
-        with connection.session as session:
-            session.execute(text("""CREATE TABLE IF NOT EXISTS customer_exports(customer_code TEXT PRIMARY KEY,customer_name TEXT NOT NULL,filename TEXT NOT NULL,content BYTEA NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
-            session.commit()
-    return run_db_with_retry(operation)
+    with db_connection().session as session:
+        session.execute(text("""CREATE TABLE IF NOT EXISTS customer_exports(customer_code TEXT PRIMARY KEY,customer_name TEXT NOT NULL,filename TEXT NOT NULL,content BYTEA NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+        session.commit()
 def ensure_targets_table():
     with db_connection().session as session:
         session.execute(text("""CREATE TABLE IF NOT EXISTS customer_targets(customer_code TEXT PRIMARY KEY,super_pre_split NUMERIC NOT NULL DEFAULT 0,super_pre_aqua NUMERIC NOT NULL DEFAULT 0,target_annuale_hvac NUMERIC NOT NULL DEFAULT 0,target_q1_hvac NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
@@ -90,33 +74,48 @@ def save_targets(code, super_split, super_aqua, annuale, q1):
     with db_connection().session as session:
         session.execute(text("""INSERT INTO customer_targets(customer_code,super_pre_split,super_pre_aqua,target_annuale_hvac,target_q1_hvac,updated_at) VALUES(:code,:split,:aqua,:annuale,:q1,CURRENT_TIMESTAMP) ON CONFLICT(customer_code) DO UPDATE SET super_pre_split=:split,super_pre_aqua=:aqua,target_annuale_hvac=:annuale,target_q1_hvac=:q1,updated_at=CURRENT_TIMESTAMP"""), {"code":code,"split":float(super_split),"aqua":float(super_aqua),"annuale":float(annuale),"q1":float(q1)})
         session.commit()
-def load_google_order_pdf(customer_code, order_number):
+def load_google_document(customer_code, order_number, document_type="conferma"):
     config = st.secrets.get("google_pdf", {})
     webapp_url = str(config.get("webapp_url", "")).strip()
     token = str(config.get("token", "")).strip()
     if not webapp_url or not token:
-        return None, "Configurazione Google PDF non disponibile."
+        return [], "Configurazione Google PDF non disponibile."
     params = urllib.parse.urlencode({
         "cliente": str(customer_code).strip().upper(),
         "ordine": str(order_number).strip().upper(),
+        "tipo": str(document_type).strip().lower(),
         "token": token,
     })
     url = webapp_url + ("&" if "?" in webapp_url else "?") + params
     try:
         request = urllib.request.Request(url, headers={"User-Agent": "MD-Rappresentanze-Dashboard/1.0"})
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with urllib.request.urlopen(request, timeout=25) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        if payload.get("ok") and payload.get("trovato") and payload.get("pdf"):
-            return {
-                "filename": payload.get("filename") or f"{order_number}.pdf",
-                "content": base64.b64decode(payload["pdf"]),
-                "source": "Google Drive",
-            }, None
+        if payload.get("ok") and payload.get("trovato"):
+            raw_files = payload.get("files") or []
+            if not raw_files and payload.get("pdf"):
+                raw_files = [{"filename": payload.get("filename") or f"{order_number}.pdf", "pdf": payload.get("pdf")}]
+            documents = []
+            for item in raw_files:
+                if item.get("pdf"):
+                    documents.append({
+                        "filename": item.get("filename") or f"{order_number}.pdf",
+                        "content": base64.b64decode(item["pdf"]),
+                        "source": "Google Drive",
+                    })
+            return documents, None
         if payload.get("trovato") is False:
-            return None, None
-        return None, payload.get("errore") or "Risposta Google PDF non valida."
+            return [], None
+        return [], payload.get("errore") or "Risposta Google PDF non valida."
     except Exception as exc:
-        return None, f"Collegamento Google PDF non disponibile: {exc}"
+        return [], f"Collegamento Google PDF non disponibile: {exc}"
+
+def load_google_order_pdf(customer_code, order_number):
+    documents, error = load_google_document(customer_code, order_number, "conferma")
+    return (documents[0] if documents else None), error
+
+def load_google_ddt(customer_code, order_number):
+    return load_google_document(customer_code, order_number, "ddt")
 
 def ensure_order_pdfs_table():
     with db_connection().session as session:
@@ -142,17 +141,12 @@ def save_file(code, name, filename, content):
         session.commit()
 def load_file(code):
     ensure_table()
-    def operation(connection):
-        with connection.session as session:
-            return session.execute(text("SELECT customer_name,filename,content,updated_at FROM customer_exports WHERE customer_code=:code"), {"code":code}).mappings().first()
-    return run_db_with_retry(operation)
+    with db_connection().session as session:
+        return session.execute(text("SELECT customer_name,filename,content,updated_at FROM customer_exports WHERE customer_code=:code"), {"code":code}).mappings().first()
 def dataset_status():
     ensure_table()
-    def operation(connection):
-        with connection.session as session:
-            rows = session.execute(text("SELECT customer_code,customer_name,filename,updated_at FROM customer_exports")).mappings().all()
-            return {r["customer_code"]:r for r in rows}
-    return run_db_with_retry(operation)
+    with db_connection().session as session:
+        return {r["customer_code"]:r for r in session.execute(text("SELECT customer_code,customer_name,filename,updated_at FROM customer_exports")).mappings().all()}
 
 def normalize(value):
     if value is None or pd.isna(value): return ""
@@ -435,6 +429,25 @@ def dashboard(data, code, name):
             st.warning(pdf_error)
         else:
             st.info("PDF conferma non ancora disponibile.")
+
+        ddt_documents, ddt_error = load_google_ddt(code, selected_order)
+        if ddt_documents:
+            st.markdown("**Documenti di trasporto disponibili**")
+            ddt_columns = st.columns(min(len(ddt_documents), 3))
+            for index, document in enumerate(ddt_documents):
+                with ddt_columns[index % len(ddt_columns)]:
+                    st.download_button(
+                        f"Apri / Scarica DDT {index + 1}",
+                        data=document["content"],
+                        file_name=document["filename"],
+                        mime="application/pdf",
+                        key=f"download_ddt_{code}_{selected_order}_{index}",
+                        use_container_width=True
+                    )
+        elif ddt_error:
+            st.warning(ddt_error)
+        else:
+            st.caption("Nessun DDT disponibile per questa conferma.")
 
         selected_ranges = ranges[ranges["Numero Ordine"] == selected_order].copy()
         if not selected_ranges.empty:
