@@ -288,26 +288,40 @@ def dashboard(data, code, name):
     consuntivo_annuale = float(hvac_catalogs["Totale Complessivo"].sum())
     consuntivo_q1 = float((hvac_catalogs["Spedito Q1"] + hvac_catalogs["Da Spedire Q1"]).sum())
 
+    split_catalogs = catalogs[catalogs["Catalogo"].astype(str).str.strip().str.casefold() == "split"]
+    consuntivo_split = float(split_catalogs["Totale Complessivo"].sum())
+
+    # Super Pre Aqua: somma delle famiglie prodotto che contengono "aqua".
+    aqua_families = families[families["Famiglia Prodotto"].astype(str).str.contains("aqua", case=False, na=False)]
+    consuntivo_aqua = float(aqua_families["Totale Complessivo"].sum())
+
     def raggiungimento(consuntivo, target):
         return None if target <= 0 else (consuntivo / target) * 100
     def pct_label(value):
         return "Target da definire" if value is None else f"{value:.1f}%".replace(".", ",")
 
+    r_split = raggiungimento(consuntivo_split, target_split)
+    r_aqua = raggiungimento(consuntivo_aqua, target_aqua)
     r_annuale = raggiungimento(consuntivo_annuale, target_annuale)
     r_q1 = raggiungimento(consuntivo_q1, target_q1)
+
     t1,t2,t3,t4 = st.columns(4)
-    t1.metric("Super Pre Split", euro(target_split), delta="Target da definire" if target_split <= 0 else "Consuntivo da associare", delta_color="off")
-    t2.metric("Super Pre Aqua", euro(target_aqua), delta="Target da definire" if target_aqua <= 0 else "Consuntivo da associare", delta_color="off")
+    t1.metric("Super Pre Split", euro(target_split), delta=pct_label(r_split), delta_color="off")
+    t2.metric("Super Pre Aqua", euro(target_aqua), delta=pct_label(r_aqua), delta_color="off")
     t3.metric("Target annuale Home + Split + Fancoil", euro(target_annuale), delta=pct_label(r_annuale), delta_color="off")
     t4.metric("Target Q1 Home + Split + Fancoil", euro(target_q1), delta=pct_label(r_q1), delta_color="off")
 
-    _, p_annuale, p_q1, _ = st.columns([1,1,1,1])
-    with p_annuale:
-        st.markdown(f"<div style='text-align:center;font-weight:700;color:#202124'>Consuntivo Home + Split + Fancoil<br>{euro(consuntivo_annuale)}</div>", unsafe_allow_html=True)
-        st.progress(min(max((r_annuale or 0)/100,0),1), text=f"Raggiungimento annuale: {pct_label(r_annuale)}")
-    with p_q1:
-        st.markdown(f"<div style='text-align:center;font-weight:700;color:#202124'>Consuntivo Q1 Home + Split + Fancoil<br>{euro(consuntivo_q1)}</div>", unsafe_allow_html=True)
-        st.progress(min(max((r_q1 or 0)/100,0),1), text=f"Raggiungimento Q1: {pct_label(r_q1)}")
+    p_split, p_aqua, p_annuale, p_q1 = st.columns(4)
+    consuntivi = [
+        (p_split, "Consuntivo Split", consuntivo_split, r_split, "Raggiungimento Split"),
+        (p_aqua, "Consuntivo Aqua", consuntivo_aqua, r_aqua, "Raggiungimento Aqua"),
+        (p_annuale, "Consuntivo Home + Split + Fancoil", consuntivo_annuale, r_annuale, "Raggiungimento annuale"),
+        (p_q1, "Consuntivo Q1 Home + Split + Fancoil", consuntivo_q1, r_q1, "Raggiungimento Q1"),
+    ]
+    for column, label, value, percentage, progress_label in consuntivi:
+        with column:
+            st.markdown(f"<div style='text-align:center;font-weight:700;color:#202124'>{label}<br>{euro(value)}</div>", unsafe_allow_html=True)
+            st.progress(min(max((percentage or 0)/100,0),1), text=f"{progress_label}: {pct_label(percentage)}")
 
     st.subheader("Andamento trimestrale")
     qdata = pd.DataFrame({
@@ -359,7 +373,7 @@ def dashboard(data, code, name):
         )
 
     catalog_orders = orders[orders["Catalogo"] == selected_catalog].copy()
-    order_options = sorted(catalog_orders["Numero Ordine"].dropna().astype(str).unique().tolist(), key=lambda x: (re.sub(r"\D", "", x) == "", int(re.sub(r"\D", "", x) or 0), x))
+    order_options = sorted(catalog_orders["Numero Ordine"].dropna().astype(str).unique().tolist(), key=lambda x: (int(re.sub(r"\D", "", x) or 0), x), reverse=True)
 
     with filter_col2:
         if order_options:
