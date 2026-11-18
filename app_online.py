@@ -279,11 +279,43 @@ def dashboard(data, code, name):
     ranges = data[data["Livello"] == "range"].copy()
 
     catalog_options = catalogs["Catalogo"].dropna().astype(str).tolist()
-    selected_catalog = st.selectbox("Filtra per catalogo", catalog_options, key=f"catalog_summary_{code}")
+    if not catalog_options:
+        st.info("Nessun catalogo disponibile.")
+        return
 
+    filter_col1, filter_col2 = st.columns(2)
+    with filter_col1:
+        selected_catalog = st.selectbox(
+            "Filtra per catalogo",
+            catalog_options,
+            key=f"catalog_summary_{code}"
+        )
+
+    catalog_orders = orders[orders["Catalogo"] == selected_catalog].copy()
+    order_options = catalog_orders["Numero Ordine"].dropna().astype(str).tolist()
+
+    with filter_col2:
+        if order_options:
+            selected_order = st.selectbox(
+                "Conferma ordine",
+                order_options,
+                key=f"order_selector_{code}_{selected_catalog}"
+            )
+        else:
+            selected_order = None
+            st.selectbox(
+                "Conferma ordine",
+                ["Nessuna conferma disponibile"],
+                disabled=True,
+                key=f"order_selector_empty_{code}_{selected_catalog}"
+            )
+
+    # Tabella prodotti del catalogo: righe già visibili.
     family_rows = ranges[ranges["Catalogo"] == selected_catalog].copy()
     if family_rows.empty:
-        family_summary = families[families["Catalogo"] == selected_catalog][["Famiglia Prodotto","Spedito Totale","Da Spedire Totale","Totale Complessivo"]].copy()
+        family_summary = families[families["Catalogo"] == selected_catalog][[
+            "Famiglia Prodotto","Spedito Totale","Da Spedire Totale","Totale Complessivo"
+        ]].copy()
     else:
         family_summary = family_rows.groupby("Famiglia Prodotto", as_index=False).agg({
             "Spedito Totale":"sum",
@@ -294,23 +326,18 @@ def dashboard(data, code, name):
     if not family_summary.empty:
         family_summary = family_summary.sort_values("Totale Complessivo", ascending=False)
         family_display = family_summary.copy()
-        for col in ["Spedito Totale","Da Spedire Totale","Totale Complessivo"]:
+        family_display = family_display.rename(columns={
+            "Spedito Totale":"Spedito",
+            "Da Spedire Totale":"Da Spedire",
+            "Totale Complessivo":"Totale"
+        })
+        for col in ["Spedito","Da Spedire","Totale"]:
             family_display[col] = family_display[col].map(euro)
         st.dataframe(family_display, use_container_width=True, hide_index=True)
 
-    if not orders.empty:
-        catalog_orders = orders[orders["Catalogo"] == selected_catalog].copy()
-        st.markdown("**Conferme ordine del catalogo selezionato**")
-        order_table = catalog_orders[["Numero Ordine","Spedito Totale","Da Spedire Totale","Totale Complessivo"]].copy()
-        order_table = order_table.sort_values("Totale Complessivo", ascending=False)
-        for col in ["Spedito Totale","Da Spedire Totale","Totale Complessivo"]:
-            order_table[col] = order_table[col].map(euro)
-        st.dataframe(order_table, use_container_width=True, hide_index=True)
-
-        st.markdown("**Dettaglio conferma ordine**")
-        order_options = catalog_orders["Numero Ordine"].dropna().astype(str).tolist()
-        selected_order = st.selectbox("Seleziona conferma ordine", order_options, key=f"order_selector_{code}_{selected_catalog}")
+    if selected_order:
         selected_row = catalog_orders[catalog_orders["Numero Ordine"] == selected_order].iloc[0]
+        st.markdown("**Dettaglio conferma ordine selezionata**")
         o1,o2,o3 = st.columns(3)
         o1.metric("Numero ordine", selected_order)
         o2.metric("Catalogo", selected_catalog)
@@ -323,8 +350,13 @@ def dashboard(data, code, name):
                 "Da Spedire Totale":"sum",
                 "Totale Complessivo":"sum"
             })
+            range_summary = range_summary.rename(columns={
+                "Spedito Totale":"Spedito",
+                "Da Spedire Totale":"Da Spedire",
+                "Totale Complessivo":"Totale"
+            })
             range_display = range_summary.copy()
-            for col in ["Spedito Totale","Da Spedire Totale","Totale Complessivo"]:
+            for col in ["Spedito","Da Spedire","Totale"]:
                 range_display[col] = range_display[col].map(euro)
             st.dataframe(range_display, use_container_width=True, hide_index=True)
 
