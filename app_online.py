@@ -655,6 +655,82 @@ def order_pdfs_page():
         st.dataframe(status_df,use_container_width=True,hide_index=True)
     else:
         st.info("Nessun PDF caricato.")
+def ensure_superpre_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS addendum_superpre(customer_code TEXT NOT NULL,family_code TEXT NOT NULL,target_h1 NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,family_code))"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def load_superpre_targets(customer_code):
+    ensure_superpre_table()
+    def operation(connection):
+        with connection.session as session:
+            rows=session.execute(text("SELECT family_code,target_h1 FROM addendum_superpre WHERE customer_code=:code"),{"code":customer_code}).mappings().all()
+            return {r["family_code"]:float(r["target_h1"] or 0) for r in rows}
+    return run_db_with_retry(operation)
+
+def save_superpre_targets(customer_code, values):
+    ensure_superpre_table()
+    def operation(connection):
+        with connection.session as session:
+            for family,target in values.items():
+                session.execute(text("""INSERT INTO addendum_superpre(customer_code,family_code,target_h1,updated_at) VALUES(:code,:family,:target,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,family_code) DO UPDATE SET target_h1=:target,updated_at=CURRENT_TIMESTAMP"""),{"code":customer_code,"family":family,"target":float(target)})
+            session.commit()
+    return run_db_with_retry(operation)
+
+def superpre_page(user):
+    st.title("Accordi Addendum")
+    st.header("Extra Premio Super Pre 2027 · Split e Aqua F")
+    is_admin=user.get("role")=="admin"
+    if is_admin:
+        labels={f"{info['name']} · {code}":code for code,info in CLIENTS.items()}
+        selected=st.selectbox("Cliente",list(labels.keys()),key="superpre_client")
+        code=labels[selected]
+    else:
+        code=user.get("customer_code") or user.get("code")
+        if not code or code not in CLIENTS:
+            st.error("Cliente non associato all'account.")
+            return
+        st.caption(CLIENTS[code]["name"])
+
+    record=load_file(code)
+    if not record:
+        st.info("Dati cliente non disponibili.")
+        return
+    data=read_export(io.BytesIO(bytes(record["content"])))
+    catalogs=data[data["Livello"]=="catalog"].copy()
+    families=data[data["Livello"]=="family"].copy()
+    split=catalogs[catalogs["Catalogo"].astype(str).str.strip().str.casefold()=="split"]
+    aqua=families[families["Famiglia Prodotto"].astype(str).str.contains("aqua",case=False,na=False)]
+    vals={
+        "SPLIT": {"q1":float((split["Spedito Q1"]+split["Da Spedire Q1"]).sum()),"q2":float((split["Spedito Q2"]+split["Da Spedire Q2"]).sum())},
+        "AQUA_F": {"q1":float((aqua["Spedito Q1"]+aqua["Da Spedire Q1"]).sum()),"q2":float((aqua["Spedito Q2"]+aqua["Da Spedire Q2"]).sum())},
+    }
+    targets=load_superpre_targets(code)
+    if is_admin:
+        with st.form(f"superpre_targets_{code}"):
+            c1,c2=st.columns(2)
+            split_target=c1.number_input("Target Split · 100% fatturato H1 2026 (€)",min_value=0.0,value=float(targets.get("SPLIT",0)),step=1000.0,format="%.2f")
+            aqua_target=c2.number_input("Target Aqua F · 100% fatturato H1 2026 (€)",min_value=0.0,value=float(targets.get("AQUA_F",0)),step=1000.0,format="%.2f")
+            save=st.form_submit_button("Salva target Super Pre",type="primary",use_container_width=True)
+        if save:
+            save_superpre_targets(code,{"SPLIT":split_target,"AQUA_F":aqua_target});st.success("Target Super Pre salvati.");st.rerun()
+        targets={"SPLIT":split_target,"AQUA_F":aqua_target}
+
+    rows=[]; total_premio=0.0
+    for family,label in [("SPLIT","SPLIT"),("AQUA_F","AQUA F")]:
+        target=float(targets.get(family,0)); q1=vals[family]["q1"]; q2=vals[family]["q2"]
+        programmed=q1+q2
+        reached=target>0 and programmed>=target
+        premio_q1=q1*0.10 if reached else 0.0
+        premio_q2=q2*0.05 if reached else 0.0
+        premio= premio_q1+premio_q2; total_premio+=premio
+        rows.append({"Famiglia":label,"Target H1 2026":euro(target),"Programmazione Q1+Q2":euro(programmed),"Target raggiunto":"Sì" if reached else "No","Fatturato Q1":euro(q1),"Premio Q1 10%":euro(premio_q1),"Fatturato Q2":euro(q2),"Premio Q2 5%":euro(premio_q2),"Premio totale":euro(premio)})
+    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    st.metric("Premio Super Pre complessivo stimato",euro(total_premio))
+    st.caption("Il calcolo applica il 10% al Q1 e il 5% al Q2 solo quando la programmazione Q1+Q2 raggiunge il target impostato.")
+
 def ensure_addendum_bonus_table():
     def operation(connection):
         with connection.session as session:
@@ -902,7 +978,7 @@ with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
     if st.button("Esci"): st.session_state.user=None;st.rerun()
-    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0"] if user.get("role")=="admin" else ["Dashboard","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0"]
+    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F"] if user.get("role")=="admin" else ["Dashboard","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F"]
     page=st.radio("Sezione",pages)
 
 if page=="Aggiorna dati": upload_page();st.stop()
@@ -911,6 +987,7 @@ if page=="Target annuali": targets_page();st.stop()
 if page=="Gestione PDF conferme": order_pdfs_page();st.stop()
 if page=="Accordi Addendum · Promo EDGE e AQUA": addendum_page(user,"promo");st.stop()
 if page=="Accordi Addendum · EDGE EVO 2.0": addendum_page(user,"evo");st.stop()
+if page=="Accordi Addendum · Super Pre Split e Aqua F": superpre_page(user);st.stop()
 if user.get("role")=="admin":
     admin_dashboard();st.stop()
 code=str(user.get("customer_code","")).strip().upper()
