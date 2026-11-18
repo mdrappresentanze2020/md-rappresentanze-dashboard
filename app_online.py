@@ -70,6 +70,23 @@ def save_targets(code, super_split, super_aqua, annuale, q1):
     with db_connection().session as session:
         session.execute(text("""INSERT INTO customer_targets(customer_code,super_pre_split,super_pre_aqua,target_annuale_hvac,target_q1_hvac,updated_at) VALUES(:code,:split,:aqua,:annuale,:q1,CURRENT_TIMESTAMP) ON CONFLICT(customer_code) DO UPDATE SET super_pre_split=:split,super_pre_aqua=:aqua,target_annuale_hvac=:annuale,target_q1_hvac=:q1,updated_at=CURRENT_TIMESTAMP"""), {"code":code,"split":float(super_split),"aqua":float(super_aqua),"annuale":float(annuale),"q1":float(q1)})
         session.commit()
+def ensure_order_pdfs_table():
+    with db_connection().session as session:
+        session.execute(text("""CREATE TABLE IF NOT EXISTS order_pdfs(customer_code TEXT NOT NULL,order_number TEXT NOT NULL,filename TEXT NOT NULL,content BYTEA NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,order_number))"""))
+        session.commit()
+def save_order_pdf(customer_code, order_number, filename, content):
+    ensure_order_pdfs_table()
+    with db_connection().session as session:
+        session.execute(text("""INSERT INTO order_pdfs(customer_code,order_number,filename,content,updated_at) VALUES(:code,:order_number,:filename,:content,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,order_number) DO UPDATE SET filename=:filename,content=:content,updated_at=CURRENT_TIMESTAMP"""), {"code":customer_code,"order_number":str(order_number),"filename":filename,"content":content})
+        session.commit()
+def load_order_pdf(customer_code, order_number):
+    ensure_order_pdfs_table()
+    with db_connection().session as session:
+        return session.execute(text("SELECT filename,content,updated_at FROM order_pdfs WHERE customer_code=:code AND order_number=:order_number"), {"code":customer_code,"order_number":str(order_number)}).mappings().first()
+def pdf_status():
+    ensure_order_pdfs_table()
+    with db_connection().session as session:
+        return session.execute(text("SELECT customer_code,order_number,filename,updated_at FROM order_pdfs ORDER BY customer_code,order_number")).mappings().all()
 def save_file(code, name, filename, content):
     ensure_table()
     with db_connection().session as session:
@@ -342,6 +359,19 @@ def dashboard(data, code, name):
         o1.metric("Numero ordine", selected_order)
         o2.metric("Catalogo", selected_catalog)
         o3.metric("Totale ordine", euro(selected_row["Totale Complessivo"]))
+        pdf_record = load_order_pdf(code, selected_order)
+        if pdf_record:
+            st.download_button(
+                "Apri / Scarica conferma PDF",
+                data=bytes(pdf_record["content"]),
+                file_name=pdf_record["filename"],
+                mime="application/pdf",
+                key=f"download_pdf_{code}_{selected_order}",
+                type="primary"
+            )
+            st.caption(f"PDF aggiornato: {pdf_record['updated_at']}")
+        else:
+            st.info("PDF conferma non ancora disponibile.")
 
         selected_ranges = ranges[ranges["Numero Ordine"] == selected_order].copy()
         if not selected_ranges.empty:
@@ -450,6 +480,44 @@ def admin_dashboard():
             dashboard(data, found_code, found_name)
             st.caption(f"Ultimo aggiornamento: {updated_at}")
 
+def order_pdfs_page():
+    st.title("Gestione PDF conferme Clivet")
+    st.caption("Associa ogni PDF Clivet al cliente e al numero ordine presente nella dashboard.")
+    client_labels={f"{info['name']} · {code}":code for code,info in CLIENTS.items()}
+    selected_client_label=st.selectbox("Cliente",list(client_labels.keys()),key="pdf_client")
+    selected_code=client_labels[selected_client_label]
+    record=load_file(selected_code)
+    if not record:
+        st.warning("Per questo cliente non sono ancora stati caricati i dati Excel.")
+        return
+    try:
+        data,_,_=read_export(io.BytesIO(bytes(record["content"])))
+        orders=data[data["Livello"]=="order"]["Numero Ordine"].dropna().astype(str).unique().tolist()
+    except Exception as exc:
+        st.error(f"Impossibile leggere gli ordini del cliente: {exc}")
+        return
+    if not orders:
+        st.warning("Nessun numero ordine trovato nel file del cliente.")
+        return
+    selected_order=st.selectbox("Numero ordine",orders,key=f"pdf_order_{selected_code}")
+    existing=load_order_pdf(selected_code,selected_order)
+    if existing:
+        st.success(f"PDF già associato: {existing['filename']}")
+        st.download_button("Scarica PDF attuale",data=bytes(existing["content"]),file_name=existing["filename"],mime="application/pdf",key=f"admin_download_{selected_code}_{selected_order}")
+    uploaded_pdf=st.file_uploader("Carica conferma Clivet in PDF",type=["pdf"],key=f"pdf_upload_{selected_code}_{selected_order}")
+    if uploaded_pdf is not None and st.button("Salva PDF conferma",type="primary",key=f"save_pdf_{selected_code}_{selected_order}"):
+        save_order_pdf(selected_code,selected_order,uploaded_pdf.name,uploaded_pdf.getvalue())
+        st.success(f"PDF associato all'ordine {selected_order}.")
+        st.rerun()
+    st.subheader("PDF già caricati")
+    rows=[dict(r) for r in pdf_status()]
+    if rows:
+        status_df=pd.DataFrame(rows)
+        status_df["Cliente"]=status_df["customer_code"].map(lambda c: CLIENTS.get(c,{}).get("name",c))
+        status_df=status_df[["Cliente","order_number","filename","updated_at"]].rename(columns={"order_number":"Numero Ordine","filename":"File","updated_at":"Aggiornato"})
+        st.dataframe(status_df,use_container_width=True,hide_index=True)
+    else:
+        st.info("Nessun PDF caricato.")
 def targets_page():
     st.title("Target annuali")
     st.caption("I valori vengono salvati su Neon e restano invariati finché non vengono modificati dall'amministratore.")
@@ -509,12 +577,13 @@ with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
     if st.button("Esci"): st.session_state.user=None;st.rerun()
-    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali"] if user.get("role")=="admin" else ["Dashboard"]
+    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme"] if user.get("role")=="admin" else ["Dashboard"]
     page=st.radio("Sezione",pages)
 
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
+if page=="Gestione PDF conferme": order_pdfs_page();st.stop()
 if user.get("role")=="admin":
     admin_dashboard();st.stop()
 code=str(user.get("customer_code","")).strip().upper()
