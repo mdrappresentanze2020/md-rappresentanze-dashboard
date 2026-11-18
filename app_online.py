@@ -109,57 +109,56 @@ def read_export(file_obj):
     if raw.empty:
         raise ValueError("Il foglio Export è vuoto.")
     code, name = extract_customer(raw)
-
-    # Nuovo tracciato dettagliato: tre righe di intestazione e 14 colonne.
     header_idx = next((idx for idx, row in raw.iterrows()
                        if "Cliente" in [normalize(v) for v in row.tolist()]
                        and "Catalogo" in [normalize(v) for v in row.tolist()]
                        and "Famiglia Prodotto" in [normalize(v) for v in row.tolist()]), None)
     if header_idx is None:
         raise ValueError("Intestazioni Cliente, Catalogo e Famiglia Prodotto non trovate.")
-
+    header_values = [normalize(v) for v in raw.iloc[header_idx].tolist()]
+    has_orders = "Numero Ordine" in header_values
+    value_start = 4 if has_orders else 3
     records = []
     current_client = ""
     current_catalog = ""
+    current_family = ""
     for r in range(header_idx + 1, len(raw)):
-        row = raw.iloc[r].tolist() + [None] * max(0, 14-len(raw.iloc[r].tolist()))
-        client = normalize(row[0])
-        catalog = normalize(row[1])
-        family = normalize(row[2])
+        row = raw.iloc[r].tolist()
+        row += [None] * max(0, value_start + 11 - len(row))
+        client, catalog, family = normalize(row[0]), normalize(row[1]), normalize(row[2])
+        order_number = normalize(row[3]) if has_orders else ""
         if client.startswith("Filtri applicati"):
             break
-        if client:
-            current_client = client
-        if catalog:
-            current_catalog = catalog
-        if not client and not catalog and not family:
-            continue
-        if current_client == "Total":
-            level = "grand_total"
-            label = "Total"
-        elif catalog == "Total" and not family:
-            level = "grand_total"
-            label = "Total"
-        elif family == "Total":
-            level = "catalog"
-            label = current_catalog
-        elif family:
-            level = "family"
-            label = family
+        if client: current_client = client
+        if catalog and catalog != "Total": current_catalog = catalog
+        if family and family != "Total": current_family = family
+        if not client and not catalog and not family and not order_number: continue
+        if current_client == "Total" or (catalog == "Total" and not family and not order_number):
+            level, label = "grand_total", "Total"
+        elif family == "Total" and not order_number:
+            level, label = "catalog", current_catalog
+        elif order_number == "Total" and family:
+            level, label = "family", family
+            current_family = family
+        elif order_number and order_number != "Total":
+            level, label = "order", order_number
+        elif family and not has_orders:
+            level, label = "family", family
         else:
             continue
-        nums = [pd.to_numeric(row[i], errors="coerce") for i in range(3,14)]
+        nums = [pd.to_numeric(row[i], errors="coerce") for i in range(value_start, value_start + 11)]
         nums = [0.0 if pd.isna(x) else float(x) for x in nums]
         records.append({
-            "Livello": level, "Catalogo": current_catalog if level != "grand_total" else "Total",
-            "Famiglia Prodotto": label if level == "family" else "",
+            "Livello": level,
+            "Catalogo": current_catalog if level != "grand_total" else "Total",
+            "Famiglia Prodotto": current_family if level == "order" else (label if level == "family" else ""),
+            "Numero Ordine": label if level == "order" else "",
             "Spedito Q1": nums[0], "Spedito Q2": nums[1], "Spedito Q3": nums[2], "Spedito Q4": nums[3], "Spedito Totale": nums[4],
             "Da Spedire Q1": nums[5], "Da Spedire Q2": nums[6], "Da Spedire Q3": nums[7], "Da Spedire Q4": nums[8], "Da Spedire Totale": nums[9],
             "Totale Complessivo": nums[10]
         })
     data = pd.DataFrame(records)
-    if data.empty:
-        raise ValueError("Nessuna riga dettagliata valida trovata.")
+    if data.empty: raise ValueError("Nessuna riga dettagliata valida trovata.")
     return data, code, name
 
 def euro(v):
@@ -256,6 +255,49 @@ def dashboard(data, code, name):
     family_view = families[families["Catalogo"] == selected][["Famiglia Prodotto","Spedito Q1","Spedito Q2","Spedito Q3","Spedito Q4","Spedito Totale","Da Spedire Q1","Da Spedire Q2","Da Spedire Q3","Da Spedire Q4","Da Spedire Totale","Totale Complessivo"]].copy()
     for col in family_view.columns[1:]: family_view[col] = family_view[col].map(euro)
     st.dataframe(family_view, use_container_width=True, hide_index=True)
+    orders = data[data["Livello"] == "order"].copy()
+    if not orders.empty:
+        st.subheader("Conferme ordine")
+        order_options = orders["Numero Ordine"].dropna().astype(str).tolist()
+        selected_order = st.selectbox("Seleziona conferma ordine", order_options, key=f"order_selector_{code}")
+        selected_row = orders[orders["Numero Ordine"] == selected_order].iloc[0]
+        o1,o2,o3,o4 = st.columns(4)
+        o1.metric("Numero ordine", selected_order)
+        o2.metric("Catalogo", selected_row["Catalogo"])
+        o3.metric("Famiglia prodotto", selected_row["Famiglia Prodotto"])
+        o4.metric("Totale ordine", euro(selected_row["Totale Complessivo"]))
+        order_quarters = pd.DataFrame({
+            "Trimestre": ["Q1","Q2","Q3","Q4"],
+            "Spedito": [selected_row[f"Spedito Q{i}"] for i in range(1,5)],
+            "Da Spedire": [selected_row[f"Da Spedire Q{i}"] for i in range(1,5)]
+        })
+        fig_order = go.Figure()
+        fig_order.add_bar(name="Spedito", x=order_quarters["Trimestre"], y=order_quarters["Spedito"], marker_color="#4F8FC5")
+        fig_order.add_bar(name="Da Spedire", x=order_quarters["Trimestre"], y=order_quarters["Da Spedire"], marker_color="#D6E86B")
+        fig_order.update_layout(barmode="stack",height=300,paper_bgcolor="white",plot_bgcolor="white",legend=dict(orientation="h",font=dict(color="#202124")),margin=dict(l=20,r=10,t=15,b=20),xaxis=dict(showgrid=False,tickfont=dict(color="#202124")),yaxis=dict(gridcolor="#e5e7eb",tickfont=dict(color="#4b5563"),title="Euro"))
+        st.plotly_chart(fig_order, use_container_width=True)
+        order_summary = pd.DataFrame({
+            "Voce": ["Spedito","Da Spedire","Totale"],
+            "Q1": [selected_row["Spedito Q1"],selected_row["Da Spedire Q1"],selected_row["Spedito Q1"]+selected_row["Da Spedire Q1"]],
+            "Q2": [selected_row["Spedito Q2"],selected_row["Da Spedire Q2"],selected_row["Spedito Q2"]+selected_row["Da Spedire Q2"]],
+            "Q3": [selected_row["Spedito Q3"],selected_row["Da Spedire Q3"],selected_row["Spedito Q3"]+selected_row["Da Spedire Q3"]],
+            "Q4": [selected_row["Spedito Q4"],selected_row["Da Spedire Q4"],selected_row["Spedito Q4"]+selected_row["Da Spedire Q4"]],
+            "Totale": [selected_row["Spedito Totale"],selected_row["Da Spedire Totale"],selected_row["Totale Complessivo"]]
+        })
+        for col in ["Q1","Q2","Q3","Q4","Totale"]: order_summary[col] = order_summary[col].map(euro)
+        st.dataframe(order_summary,use_container_width=True,hide_index=True)
+        with st.expander("Elenco completo conferme ordine"):
+            catalog_filter=st.multiselect("Filtra per catalogo",sorted(orders["Catalogo"].dropna().unique().tolist()))
+            family_filter=st.multiselect("Filtra per famiglia prodotto",sorted(orders["Famiglia Prodotto"].dropna().unique().tolist()))
+            only_pending=st.checkbox("Mostra solo ordini con valore Da Spedire")
+            filtered_orders=orders.copy()
+            if catalog_filter: filtered_orders=filtered_orders[filtered_orders["Catalogo"].isin(catalog_filter)]
+            if family_filter: filtered_orders=filtered_orders[filtered_orders["Famiglia Prodotto"].isin(family_filter)]
+            if only_pending: filtered_orders=filtered_orders[filtered_orders["Da Spedire Totale"]>0]
+            order_table=filtered_orders[["Numero Ordine","Catalogo","Famiglia Prodotto","Spedito Totale","Da Spedire Totale","Totale Complessivo"]].copy()
+            for col in ["Spedito Totale","Da Spedire Totale","Totale Complessivo"]: order_table[col]=order_table[col].map(euro)
+            st.dataframe(order_table,use_container_width=True,hide_index=True)
+
 
 def admin_dashboard():
     st.title("Cruscotto generale MD Rappresentanze")
