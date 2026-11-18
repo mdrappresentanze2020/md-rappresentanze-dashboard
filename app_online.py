@@ -725,7 +725,7 @@ def commercial_agreement_page(user):
         baseline_q1=current_q1
         st.caption("Anteprima: finché lo snapshot 2026 non viene fissato dall'Admin, il confronto usa i dati correnti.")
 
-    target_q1=baseline_q1*1.15
+    target_q1=baseline_q1*1.00
     annual_targets=[(0.80,0.01),(0.90,0.02),(1.00,0.04),(1.10,0.05),(1.20,0.06)]
     ratio=(current_year/baseline) if baseline>0 else 0
     achieved_rate=0.0
@@ -748,7 +748,7 @@ def commercial_agreement_page(user):
     st.subheader("Target 1° trimestre")
     q1a,q1b,q1c,q1d=st.columns(4)
     q1a.metric("Q1 2026 fisso",euro(baseline_q1))
-    q1b.metric("Target Q1 · 115%",euro(target_q1))
+    q1b.metric("Target Q1 · 100%",euro(target_q1))
     q1c.metric("Q1 2027 attuale",euro(current_q1))
     q1d.metric("Premio Q1 · 3%",euro(q1_prize),delta="Raggiunto" if q1_reached else "Non raggiunto")
 
