@@ -740,21 +740,11 @@ def superpre_page(user):
         programmed=q1+q2
         # Tolleranza di un centesimo per evitare che valori visualmente uguali
         # risultino non raggiunti a causa dei decimali interni.
-        reached=target>0 and programmed+0.01>=target
+        reached=target>0 and round(programmed)>=round(target)
         premio_q1=q1*0.10 if reached else 0.0
         premio_q2=q2*0.05 if reached else 0.0
         premio=premio_q1+premio_q2; total_premio+=premio
-        results.append((label,target,programmed,reached,premio))
         rows.append({"Famiglia":label,"Target H1 fisso":euro(target),"Fatto Q1 attuale":euro(actuals[family]["q1"]),"Fatto Q2 fino ad oggi":euro(actuals[family]["q2"]),"Programmazione Q1":euro(q1),"Programmazione Q2":euro(q2),"Programmazione totale":euro(programmed),"Target raggiunto":"Sì" if reached else "No","Premio Q1 10%":euro(premio_q1),"Premio Q2 5%":euro(premio_q2),"Premio totale":euro(premio)})
-
-    # Riepilogo sempre visibile, senza dover scorrere orizzontalmente la tabella.
-    for label,target,programmed,reached,premio in results:
-        st.subheader(label)
-        r1,r2,r3,r4=st.columns(4)
-        r1.metric("Target distinto",euro(target))
-        r2.metric("Programmazione totale",euro(programmed))
-        r3.metric("Target raggiunto","SÌ" if reached else "NO")
-        r4.metric("Premio maturato",euro(premio))
     st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
     st.metric("Premio Super Pre complessivo stimato",euro(total_premio))
     st.caption("I target SPLIT e AQUA F sono distinti. Il target può essere raggiunto interamente nel Q1, interamente nel Q2 oppure sommando i due trimestri. Il premio è pari al 10% della quota programmata nel Q1 e al 5% della quota programmata nel Q2, purché il relativo target sia raggiunto.")
