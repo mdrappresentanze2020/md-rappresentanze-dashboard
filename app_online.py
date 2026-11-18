@@ -658,24 +658,26 @@ def order_pdfs_page():
 def ensure_superpre_table():
     def operation(connection):
         with connection.session as session:
-            session.execute(text("""CREATE TABLE IF NOT EXISTS addendum_superpre(customer_code TEXT NOT NULL,family_code TEXT NOT NULL,target_h1 NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,family_code))"""))
+            session.execute(text("""CREATE TABLE IF NOT EXISTS addendum_superpre(customer_code TEXT NOT NULL,family_code TEXT NOT NULL,target_h1 NUMERIC NOT NULL DEFAULT 0,program_q1 NUMERIC NOT NULL DEFAULT 0,program_q2 NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,family_code))"""))
+            session.execute(text("ALTER TABLE addendum_superpre ADD COLUMN IF NOT EXISTS program_q1 NUMERIC NOT NULL DEFAULT 0"))
+            session.execute(text("ALTER TABLE addendum_superpre ADD COLUMN IF NOT EXISTS program_q2 NUMERIC NOT NULL DEFAULT 0"))
             session.commit()
     return run_db_with_retry(operation)
 
-def load_superpre_targets(customer_code):
+def load_superpre_values(customer_code):
     ensure_superpre_table()
     def operation(connection):
         with connection.session as session:
-            rows=session.execute(text("SELECT family_code,target_h1 FROM addendum_superpre WHERE customer_code=:code"),{"code":customer_code}).mappings().all()
-            return {r["family_code"]:float(r["target_h1"] or 0) for r in rows}
+            rows=session.execute(text("SELECT family_code,program_q1,program_q2 FROM addendum_superpre WHERE customer_code=:code"),{"code":customer_code}).mappings().all()
+            return {r["family_code"]:{"q1":float(r["program_q1"] or 0),"q2":float(r["program_q2"] or 0)} for r in rows}
     return run_db_with_retry(operation)
 
-def save_superpre_targets(customer_code, values):
+def save_superpre_program(customer_code, values):
     ensure_superpre_table()
     def operation(connection):
         with connection.session as session:
-            for family,target in values.items():
-                session.execute(text("""INSERT INTO addendum_superpre(customer_code,family_code,target_h1,updated_at) VALUES(:code,:family,:target,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,family_code) DO UPDATE SET target_h1=:target,updated_at=CURRENT_TIMESTAMP"""),{"code":customer_code,"family":family,"target":float(target)})
+            for family,item in values.items():
+                session.execute(text("""INSERT INTO addendum_superpre(customer_code,family_code,program_q1,program_q2,updated_at) VALUES(:code,:family,:q1,:q2,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,family_code) DO UPDATE SET program_q1=:q1,program_q2=:q2,updated_at=CURRENT_TIMESTAMP"""),{"code":customer_code,"family":family,"q1":float(item["q1"]),"q2":float(item["q2"])})
             session.commit()
     return run_db_with_retry(operation)
 
@@ -698,41 +700,47 @@ def superpre_page(user):
     if not record:
         st.info("Dati cliente non disponibili.")
         return
-    # Il file salvato su Neon contiene l'Export originale; read_export restituisce
-    # una coppia: (dataframe elaborato, metadati cliente).
     parsed=read_export(io.BytesIO(bytes(record["content"])))
     data=parsed[0] if isinstance(parsed, tuple) else parsed
     catalogs=data[data["Livello"]=="catalog"].copy()
     families=data[data["Livello"]=="family"].copy()
     split=catalogs[catalogs["Catalogo"].astype(str).str.strip().str.casefold()=="split"]
     aqua=families[families["Famiglia Prodotto"].astype(str).str.contains("aqua",case=False,na=False)]
-    vals={
-        "SPLIT": {"q1":float((split["Spedito Q1"]+split["Da Spedire Q1"]).sum()),"q2":float((split["Spedito Q2"]+split["Da Spedire Q2"]).sum())},
-        "AQUA_F": {"q1":float((aqua["Spedito Q1"]+aqua["Da Spedire Q1"]).sum()),"q2":float((aqua["Spedito Q2"]+aqua["Da Spedire Q2"]).sum())},
-    }
-    targets=load_superpre_targets(code)
-    if is_admin:
-        with st.form(f"superpre_targets_{code}"):
-            c1,c2=st.columns(2)
-            split_target=c1.number_input("Target Split · 100% fatturato H1 2026 (€)",min_value=0.0,value=float(targets.get("SPLIT",0)),step=1000.0,format="%.2f")
-            aqua_target=c2.number_input("Target Aqua F · 100% fatturato H1 2026 (€)",min_value=0.0,value=float(targets.get("AQUA_F",0)),step=1000.0,format="%.2f")
-            save=st.form_submit_button("Salva target Super Pre",type="primary",use_container_width=True)
-        if save:
-            save_superpre_targets(code,{"SPLIT":split_target,"AQUA_F":aqua_target});st.success("Target Super Pre salvati.");st.rerun()
-        targets={"SPLIT":split_target,"AQUA_F":aqua_target}
 
+    # Target H1 fisso: consuntivo Q1 + Q2 già presente nel file cliente.
+    target_split=float((split["Spedito Q1"]+split["Da Spedire Q1"]+split["Spedito Q2"]+split["Da Spedire Q2"]).sum())
+    target_aqua=float((aqua["Spedito Q1"]+aqua["Da Spedire Q1"]+aqua["Spedito Q2"]+aqua["Da Spedire Q2"]).sum())
+    targets={"SPLIT":target_split,"AQUA_F":target_aqua}
+    programs=load_superpre_values(code)
+
+    # La programmazione è libera e separata per trimestre.
+    with st.form(f"superpre_program_{code}"):
+        st.subheader("Programmazione libera")
+        s1,s2=st.columns(2)
+        split_q1=s1.number_input("SPLIT · Programmazione Q1 (€)",min_value=0.0,value=float(programs.get("SPLIT",{}).get("q1",0)),step=1000.0,format="%.2f")
+        split_q2=s2.number_input("SPLIT · Programmazione Q2 (€)",min_value=0.0,value=float(programs.get("SPLIT",{}).get("q2",0)),step=1000.0,format="%.2f")
+        a1,a2=st.columns(2)
+        aqua_q1=a1.number_input("AQUA F · Programmazione Q1 (€)",min_value=0.0,value=float(programs.get("AQUA_F",{}).get("q1",0)),step=1000.0,format="%.2f")
+        aqua_q2=a2.number_input("AQUA F · Programmazione Q2 (€)",min_value=0.0,value=float(programs.get("AQUA_F",{}).get("q2",0)),step=1000.0,format="%.2f")
+        save=st.form_submit_button("Salva programmazione",type="primary",use_container_width=True)
+    if save:
+        save_superpre_program(code,{"SPLIT":{"q1":split_q1,"q2":split_q2},"AQUA_F":{"q1":aqua_q1,"q2":aqua_q2}})
+        st.success("Programmazione Super Pre salvata.");st.rerun()
+
+    program_values={"SPLIT":{"q1":split_q1,"q2":split_q2},"AQUA_F":{"q1":aqua_q1,"q2":aqua_q2}}
     rows=[]; total_premio=0.0
     for family,label in [("SPLIT","SPLIT"),("AQUA_F","AQUA F")]:
-        target=float(targets.get(family,0)); q1=vals[family]["q1"]; q2=vals[family]["q2"]
+        target=targets[family]
+        q1=program_values[family]["q1"]; q2=program_values[family]["q2"]
         programmed=q1+q2
         reached=target>0 and programmed>=target
         premio_q1=q1*0.10 if reached else 0.0
         premio_q2=q2*0.05 if reached else 0.0
-        premio= premio_q1+premio_q2; total_premio+=premio
-        rows.append({"Famiglia":label,"Target H1 2026":euro(target),"Programmazione Q1+Q2":euro(programmed),"Target raggiunto":"Sì" if reached else "No","Fatturato Q1":euro(q1),"Premio Q1 10%":euro(premio_q1),"Fatturato Q2":euro(q2),"Premio Q2 5%":euro(premio_q2),"Premio totale":euro(premio)})
+        premio=premio_q1+premio_q2; total_premio+=premio
+        rows.append({"Famiglia":label,"Target H1 fisso":euro(target),"Programmazione Q1":euro(q1),"Programmazione Q2":euro(q2),"Programmazione totale":euro(programmed),"Target raggiunto":"Sì" if reached else "No","Premio Q1 10%":euro(premio_q1),"Premio Q2 5%":euro(premio_q2),"Premio totale":euro(premio)})
     st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
     st.metric("Premio Super Pre complessivo stimato",euro(total_premio))
-    st.caption("Il calcolo applica il 10% al Q1 e il 5% al Q2 solo quando la programmazione Q1+Q2 raggiunge il target impostato.")
+    st.caption("Il Target H1 è fisso e deriva dai valori Q1 + Q2 presenti nei dati cliente. La programmazione Q1 e Q2 è libera e separata per trimestre.")
 
 def ensure_addendum_bonus_table():
     def operation(connection):
