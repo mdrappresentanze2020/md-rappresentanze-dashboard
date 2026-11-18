@@ -655,6 +655,121 @@ def order_pdfs_page():
         st.dataframe(status_df,use_container_width=True,hide_index=True)
     else:
         st.info("Nessun PDF caricato.")
+def ensure_commercial_agreement_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS commercial_agreement_2027(customer_code TEXT PRIMARY KEY,baseline_2026 NUMERIC NOT NULL DEFAULT 0,baseline_q1_2026 NUMERIC NOT NULL DEFAULT 0,quantity_discount NUMERIC NOT NULL DEFAULT 0,snapshot_locked BOOLEAN NOT NULL DEFAULT FALSE,snapshot_date TIMESTAMP,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def load_commercial_agreement(code):
+    ensure_commercial_agreement_table()
+    def operation(connection):
+        with connection.session as session:
+            return session.execute(text("SELECT * FROM commercial_agreement_2027 WHERE customer_code=:code"),{"code":code}).mappings().first() or {}
+    return run_db_with_retry(operation)
+
+def save_commercial_agreement(code, baseline, baseline_q1, quantity_discount, lock_snapshot=False):
+    ensure_commercial_agreement_table()
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""INSERT INTO commercial_agreement_2027(customer_code,baseline_2026,baseline_q1_2026,quantity_discount,snapshot_locked,snapshot_date,updated_at) VALUES(:code,:baseline,:q1,:discount,:locked,CASE WHEN :locked THEN CURRENT_TIMESTAMP ELSE NULL END,CURRENT_TIMESTAMP) ON CONFLICT(customer_code) DO UPDATE SET baseline_2026=CASE WHEN commercial_agreement_2027.snapshot_locked THEN commercial_agreement_2027.baseline_2026 ELSE :baseline END,baseline_q1_2026=CASE WHEN commercial_agreement_2027.snapshot_locked THEN commercial_agreement_2027.baseline_q1_2026 ELSE :q1 END,quantity_discount=:discount,snapshot_locked=commercial_agreement_2027.snapshot_locked OR :locked,snapshot_date=CASE WHEN commercial_agreement_2027.snapshot_locked THEN commercial_agreement_2027.snapshot_date WHEN :locked THEN CURRENT_TIMESTAMP ELSE commercial_agreement_2027.snapshot_date END,updated_at=CURRENT_TIMESTAMP"""),{"code":code,"baseline":float(baseline),"q1":float(baseline_q1),"discount":float(quantity_discount),"locked":bool(lock_snapshot)})
+            session.commit()
+    return run_db_with_retry(operation)
+
+def commercial_agreement_page(user):
+    st.title("Accordi Addendum")
+    st.header("Accordo Commerciale 2027 · Rivenditore")
+    is_admin=user.get("role")=="admin"
+    if is_admin:
+        labels={f"{info['name']} · {code}":code for code,info in CLIENTS.items()}
+        selected=st.selectbox("Cliente",list(labels.keys()),key="commercial_client")
+        code=labels[selected]
+    else:
+        code=user.get("customer_code") or user.get("code")
+        if not code or code not in CLIENTS:
+            st.error("Cliente non associato all'account.");return
+        st.caption(CLIENTS[code]["name"])
+    record=load_file(code)
+    if not record:
+        st.info("Dati cliente non disponibili.");return
+    parsed=read_export(io.BytesIO(bytes(record["content"])))
+    data=parsed[0] if isinstance(parsed,tuple) else parsed
+    catalogs=data[data["Livello"]=="catalog"].copy()
+    hs=catalogs[catalogs["Catalogo"].astype(str).str.strip().str.casefold().isin(["home","split"])]
+    current_q1=float((hs["Spedito Q1"]+hs["Da Spedire Q1"]).sum())
+    current_year=float(hs["Totale Complessivo"].sum())
+    agreement=load_commercial_agreement(code)
+    locked=bool(agreement.get("snapshot_locked",False))
+    baseline=float(agreement.get("baseline_2026",0) or 0)
+    baseline_q1=float(agreement.get("baseline_q1_2026",0) or 0)
+    discount=float(agreement.get("quantity_discount",0) or 0)
+
+    if is_admin:
+        with st.form(f"agreement_admin_{code}"):
+            st.subheader("Parametri amministratore")
+            q_discount=st.number_input("Sconto quantità HOME (%)",min_value=0.0,max_value=100.0,value=discount,step=0.5,format="%.2f",help="Valore riservato all'Admin. Lo sconto quantità è cumulabile con gli eventuali sconti pre-stagionali previsti dall'accordo.")
+            if locked:
+                st.info(f"Consuntivo 2026 fissato: {euro(baseline)} · Q1 2026: {euro(baseline_q1)}")
+            else:
+                st.warning("Snapshot 2026 non ancora fissato. Il pulsante sottostante registra i dati correnti e li mantiene invariati per i confronti 2027.")
+            c1,c2=st.columns(2)
+            save=c1.form_submit_button("Salva sconto quantità",use_container_width=True)
+            lock=c2.form_submit_button("Fissa consuntivo 2026",type="primary",use_container_width=True,disabled=locked)
+        if save or lock:
+            save_commercial_agreement(code,current_year,current_q1,q_discount,lock_snapshot=lock)
+            st.success("Accordo commerciale aggiornato.");st.rerun()
+
+    if not locked:
+        baseline=current_year
+        baseline_q1=current_q1
+        st.caption("Anteprima: finché lo snapshot 2026 non viene fissato dall'Admin, il confronto usa i dati correnti.")
+
+    target_q1=baseline_q1*1.15
+    annual_targets=[(0.80,0.01),(0.90,0.02),(1.00,0.04),(1.10,0.05),(1.20,0.06)]
+    ratio=(current_year/baseline) if baseline>0 else 0
+    achieved_rate=0.0
+    achieved_target=0.0
+    for threshold,rate in annual_targets:
+        if ratio+1e-9>=threshold:
+            achieved_rate=rate; achieved_target=threshold
+    min_turnover_ok=current_year>=50000
+    annual_prize=current_year*achieved_rate if min_turnover_ok else 0.0
+    q1_reached=target_q1>0 and current_q1>=target_q1
+    q1_prize=current_q1*0.03 if q1_reached and min_turnover_ok else 0.0
+
+    st.subheader("Confronto 2026 → 2027")
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Consuntivo HOME+SPLIT 2026",euro(baseline))
+    c2.metric("HOME+SPLIT 2027 attuale",euro(current_year))
+    c3.metric("Avanzamento vs 2026",f"{ratio*100:.1f}%".replace(".",","))
+    c4.metric("Sconto quantità HOME",f"{discount:.2f}%".replace(".",","))
+
+    st.subheader("Target 1° trimestre")
+    q1a,q1b,q1c,q1d=st.columns(4)
+    q1a.metric("Q1 2026 fisso",euro(baseline_q1))
+    q1b.metric("Target Q1 · 115%",euro(target_q1))
+    q1c.metric("Q1 2027 attuale",euro(current_q1))
+    q1d.metric("Premio Q1 · 3%",euro(q1_prize),delta="Raggiunto" if q1_reached else "Non raggiunto")
+
+    st.subheader("Target annuale e premio")
+    rows=[]
+    for threshold,rate in annual_targets:
+        target_value=baseline*threshold
+        reached=baseline>0 and current_year>=target_value
+        rows.append({"Obiettivo vs 2026":f"{threshold*100:.0f}%","Target":euro(target_value),"Premio":f"{rate*100:.0f}%","Stato":"Raggiunto" if reached else "Da raggiungere","Valore premio sul fatturato attuale":euro(current_year*rate if reached and min_turnover_ok else 0)})
+    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    p1,p2,p3=st.columns(3)
+    p1.metric("Premio annuale maturato",euro(annual_prize),delta=f"{achieved_rate*100:.0f}%" if achieved_rate else "0%")
+    p2.metric("Premio Q1 maturato",euro(q1_prize))
+    p3.metric("Fatturato minimo €50.000","OK" if min_turnover_ok else "NON RAGGIUNTO")
+
+    st.subheader("Condizioni commerciali principali")
+    st.markdown("**Sconti catalogo:** HOME base 55%; SPLIT base 60%; prestagionale SPLIT fino a 99 pz 64%, oltre 100 pz 65%. VRF e APPLIED su richiesta di offerta.")
+    st.markdown("**Trasporto:** HOME + SPLIT Italia 3,5% sul netto. Importo minimo addebitabile per un trasporto €50.")
+    st.markdown("**Pre-stagionali:** soglie minime definite per SPLIT, EDGE, HYDRO-SPLIT, AQUA, FANCOILS e SINERGY, calcolate sul 60% dell'anno precedente con minimi specifici.")
+    st.caption("I premi sono una stima di dashboard. Restano soggetti alle ulteriori condizioni di riconoscimento previste dall'accordo commerciale.")
+
 def ensure_bilico_table():
     def operation(connection):
         with connection.session as session:
@@ -1084,7 +1199,7 @@ with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
     if st.button("Esci"): st.session_state.user=None;st.rerun()
-    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027"] if user.get("role")=="admin" else ["Dashboard","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027"]
+    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Aggiorna dati": upload_page();st.stop()
@@ -1095,6 +1210,7 @@ if page=="Accordi Addendum · Promo EDGE e AQUA": addendum_page(user,"promo");st
 if page=="Accordi Addendum · EDGE EVO 2.0": addendum_page(user,"evo");st.stop()
 if page=="Accordi Addendum · Super Pre Split e Aqua F": superpre_page(user);st.stop()
 if page=="Accordi Addendum · Sconto Bilico 2027": bilico_page(user);st.stop()
+if page=="Accordi Addendum · Accordo Commerciale 2027": commercial_agreement_page(user);st.stop()
 if user.get("role")=="admin":
     admin_dashboard();st.stop()
 code=str(user.get("customer_code","")).strip().upper()
