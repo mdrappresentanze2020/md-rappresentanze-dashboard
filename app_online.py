@@ -814,7 +814,7 @@ def bilico_page(user):
         st.caption(CLIENTS[code]["name"])
 
     lines={
-      "EZCOOL": {"title":"EZCool (MLA1-Y + ILA1-Y)","sizes":[("27M",234.0),("35M",251.0),("53M",450.0),("70M",549.0)]},
+      "NATIVE2": {"title":"NATIVE 2 (MLA1-Y + IZA1-Y)","sizes":[("27M",213.0),("35M",237.0),("53M",441.0),("70M",537.0)]},
       "CRISTALLO2": {"title":"CRISTALLO 2 (MMA1-Y + IMA1-Y)","sizes":[("27M",377.0),("35M",397.0),("53M",632.0),("70M",765.0)]},
     }
     saved=load_bilico(code)
@@ -857,6 +857,13 @@ def bilico_page(user):
         c2.metric("Extra sconto",euro(extra_value),delta=f"{extra:.2f}%".replace(".",","))
         c3.metric("Totale dopo extra sconto",euro(final))
     st.metric("Totale complessivo Sconto Bilico",euro(grand_total))
+
+    st.divider()
+    st.subheader("Legenda · NATIVE 2 fuori catalogo / listino")
+    st.markdown("- **NATIVE 2 – Set MLA1-Y + IZA1-Y** è inclusa tra le serie prodotto considerate nel catalogo SPLIT ai fini dell'accordo commerciale.")
+    st.markdown("- Il fatturato NATIVE 2 concorre al monte fatturato utile al raggiungimento dei target premiabili **solo per vendite tramite canale distributivo offline**, cioè punti vendita fisici / banco.")
+    st.markdown("- Le vendite effettuate direttamente o indirettamente tramite **e-commerce, piattaforme digitali o marketplace terzi sono escluse** dal monte fatturato utile al calcolo e alla maturazione dei premi.")
+    st.markdown("- Restano confermate e invariate le altre condizioni dell'Accordo Commerciale 2027.")
 
 def ensure_superpre_table():
     def operation(connection):
