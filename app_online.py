@@ -151,6 +151,17 @@ def dataset_status():
     with db_connection().session as session:
         return {r["customer_code"]:r for r in session.execute(text("SELECT customer_code,customer_name,filename,updated_at FROM customer_exports")).mappings().all()}
 
+def run_db_with_retry(operation):
+    connection = db_connection()
+    try:
+        return operation(connection)
+    except Exception:
+        try:
+            connection.reset()
+        except Exception:
+            pass
+        return operation(db_connection())
+
 def ensure_addendum_table():
     def operation(connection):
         with connection.session as session:
