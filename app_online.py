@@ -168,6 +168,7 @@ def ensure_addendum_table():
             session.execute(text("""CREATE TABLE IF NOT EXISTS addendum_orders(customer_code TEXT NOT NULL,product_code TEXT NOT NULL,ordered_qty INTEGER NOT NULL DEFAULT 0,list_price NUMERIC NOT NULL DEFAULT 0,promo_price NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,product_code))"""))
             session.execute(text("ALTER TABLE addendum_orders ADD COLUMN IF NOT EXISTS list_price NUMERIC NOT NULL DEFAULT 0"))
             session.execute(text("ALTER TABLE addendum_orders ADD COLUMN IF NOT EXISTS promo_price NUMERIC NOT NULL DEFAULT 0"))
+            session.execute(text("ALTER TABLE addendum_orders ADD COLUMN IF NOT EXISTS gift_value NUMERIC NOT NULL DEFAULT 0"))
             session.commit()
     return run_db_with_retry(operation)
 
@@ -175,8 +176,8 @@ def load_addendum_orders(customer_code):
     ensure_addendum_table()
     def operation(connection):
         with connection.session as session:
-            rows = session.execute(text("SELECT product_code,ordered_qty,list_price,promo_price FROM addendum_orders WHERE customer_code=:code"), {"code":customer_code}).mappings().all()
-            return {r["product_code"]: {"qty":int(r["ordered_qty"] or 0),"list_price":float(r["list_price"] or 0),"promo_price":float(r["promo_price"] or 0)} for r in rows}
+            rows = session.execute(text("SELECT product_code,ordered_qty,list_price,promo_price,gift_value FROM addendum_orders WHERE customer_code=:code"), {"code":customer_code}).mappings().all()
+            return {r["product_code"]: {"qty":int(r["ordered_qty"] or 0),"list_price":float(r["list_price"] or 0),"promo_price":float(r["promo_price"] or 0),"gift_value":float(r["gift_value"] or 0)} for r in rows}
     return run_db_with_retry(operation)
 
 def save_addendum_orders(customer_code, values):
@@ -184,7 +185,7 @@ def save_addendum_orders(customer_code, values):
     def operation(connection):
         with connection.session as session:
             for product_code, item in values.items():
-                session.execute(text("""INSERT INTO addendum_orders(customer_code,product_code,ordered_qty,list_price,promo_price,updated_at) VALUES(:code,:product,:qty,:list_price,:promo_price,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,product_code) DO UPDATE SET ordered_qty=:qty,list_price=:list_price,promo_price=:promo_price,updated_at=CURRENT_TIMESTAMP"""), {"code":customer_code,"product":product_code,"qty":int(item["qty"]),"list_price":float(item["list_price"]),"promo_price":float(item["promo_price"])})
+                session.execute(text("""INSERT INTO addendum_orders(customer_code,product_code,ordered_qty,list_price,promo_price,gift_value,updated_at) VALUES(:code,:product,:qty,:list_price,:promo_price,:gift_value,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,product_code) DO UPDATE SET ordered_qty=:qty,list_price=:list_price,promo_price=:promo_price,gift_value=:gift_value,updated_at=CURRENT_TIMESTAMP"""), {"code":customer_code,"product":product_code,"qty":int(item["qty"]),"list_price":float(item["list_price"]),"promo_price":float(item["promo_price"]),"gift_value":float(item.get("gift_value",0))})
             session.commit()
     return run_db_with_retry(operation)
 
@@ -655,18 +656,28 @@ def order_pdfs_page():
         st.info("Nessun PDF caricato.")
 def addendum_products():
     return [
-        ("EDGE_F_2.1-8.1", "EDGE F (R290) · WiSAN-PME 1 S 2.1-8.1", "Lotto minimo 5 · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1"),
-        ("AQUA_F_100-300S", "AQUA F (R290) · DSDH-P AQ 1 S 100-300S", "Lotto minimo 11 · 10 fatturati + 1 omaggio taglia inferiore"),
-        ("WISAN_YME_2.1", "EDGE EVO 2.0 · WiSAN-YME 1S 2.1", ""),
-        ("WISAN_YME_3.1", "EDGE EVO 2.0 · WiSAN-YME 1S 3.1", ""),
-        ("WISAN_YME_4.1", "EDGE EVO 2.0 · WiSAN-YME 1S 4.1", ""),
-        ("WISAN_YME_5.1", "EDGE EVO 2.0 · WiSAN-YME 1S 5.1", ""),
-        ("WISAN_YME_6.1", "EDGE EVO 2.0 · WiSAN-YME 1S 6.1", ""),
-        ("WISAN_YME_6.1T", "EDGE EVO 2.0 · WiSAN-YME 1S 6.1T", ""),
-        ("WISAN_YME_7.1", "EDGE EVO 2.0 · WiSAN-YME 1S 7.1", ""),
-        ("WISAN_YME_7.1T", "EDGE EVO 2.0 · WiSAN-YME 1S 7.1T", ""),
-        ("WISAN_YME_8.1", "EDGE EVO 2.0 · WiSAN-YME 1S 8.1", ""),
-        ("WISAN_YME_8.1T", "EDGE EVO 2.0 · WiSAN-YME 1S 8.1T", ""),
+        ("EDGE_F_2.1", "EDGE F (R290) · WiSAN-PME 1 S 2.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
+        ("EDGE_F_3.1", "EDGE F (R290) · WiSAN-PME 1 S 3.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
+        ("EDGE_F_4.1", "EDGE F (R290) · WiSAN-PME 1 S 4.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
+        ("EDGE_F_5.1", "EDGE F (R290) · WiSAN-PME 1 S 5.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
+        ("EDGE_F_6.1", "EDGE F (R290) · WiSAN-PME 1 S 6.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
+        ("EDGE_F_7.1", "EDGE F (R290) · WiSAN-PME 1 S 7.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
+        ("EDGE_F_8.1", "EDGE F (R290) · WiSAN-PME 1 S 8.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
+        ("AQUA_F_100", "AQUA F (R290) · DSDH-P AQ 1 S 100", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
+        ("AQUA_F_190", "AQUA F (R290) · DSDH-P AQ 1 S 190", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
+        ("AQUA_F_190S", "AQUA F (R290) · DSDH-P AQ 1 S 190S", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
+        ("AQUA_F_300", "AQUA F (R290) · DSDH-P AQ 1 S 300", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
+        ("AQUA_F_300S", "AQUA F (R290) · DSDH-P AQ 1 S 300S", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
+        ("WISAN_YME_2.1", "EDGE EVO 2.0 · WiSAN-YME 1S 2.1", "Prezzo netto Addendum", 1306.0),
+        ("WISAN_YME_3.1", "EDGE EVO 2.0 · WiSAN-YME 1S 3.1", "Prezzo netto Addendum", 1574.0),
+        ("WISAN_YME_4.1", "EDGE EVO 2.0 · WiSAN-YME 1S 4.1", "Prezzo netto Addendum", 1752.0),
+        ("WISAN_YME_5.1", "EDGE EVO 2.0 · WiSAN-YME 1S 5.1", "Prezzo netto Addendum", 2061.0),
+        ("WISAN_YME_6.1", "EDGE EVO 2.0 · WiSAN-YME 1S 6.1", "Prezzo netto Addendum", 2404.0),
+        ("WISAN_YME_6.1T", "EDGE EVO 2.0 · WiSAN-YME 1S 6.1T", "Prezzo netto Addendum", 2496.0),
+        ("WISAN_YME_7.1", "EDGE EVO 2.0 · WiSAN-YME 1S 7.1", "Prezzo netto Addendum", 2694.0),
+        ("WISAN_YME_7.1T", "EDGE EVO 2.0 · WiSAN-YME 1S 7.1T", "Prezzo netto Addendum", 2793.0),
+        ("WISAN_YME_8.1", "EDGE EVO 2.0 · WiSAN-YME 1S 8.1", "Prezzo netto Addendum", 2833.0),
+        ("WISAN_YME_8.1T", "EDGE EVO 2.0 · WiSAN-YME 1S 8.1T", "Prezzo netto Addendum", 2942.0),
     ]
 
 def addendum_page(user):
@@ -688,28 +699,32 @@ def addendum_page(user):
         values={}
         with st.form(f"addendum_form_{selected_code}"):
             st.subheader("Quantità e prezzi")
-            for code,label,note in products:
+            for code,label,note,default_promo in products:
                 current=saved.get(code,{})
                 st.markdown(f"**{label}**")
                 if note: st.caption(note)
-                c1,c2,c3=st.columns(3)
+                c1,c2,c3,c4=st.columns(4)
                 qty=c1.number_input("Pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{selected_code}_{code}")
                 list_price=c2.number_input("Prezzo di listino (€)",min_value=0.0,step=10.0,value=float(current.get("list_price",0)),format="%.2f",key=f"al_{selected_code}_{code}")
-                promo_price=c3.number_input("Prezzo promo (€)",min_value=0.0,step=10.0,value=float(current.get("promo_price",0)),format="%.2f",key=f"ap_{selected_code}_{code}")
-                values[code]={"qty":qty,"list_price":list_price,"promo_price":promo_price}
+                promo_saved=float(current.get("promo_price",0)); promo_default=promo_saved if promo_saved>0 else float(default_promo)
+                promo_price=c3.number_input("Prezzo promo (€)",min_value=0.0,step=10.0,value=promo_default,format="%.2f",key=f"ap_{selected_code}_{code}")
+                gift_value=c4.number_input("Valore omaggio (€)",min_value=0.0,step=10.0,value=float(current.get("gift_value",0)),format="%.2f",key=f"ag_{selected_code}_{code}")
+                values[code]={"qty":qty,"list_price":list_price,"promo_price":promo_price,"gift_value":gift_value}
             submitted=st.form_submit_button("Salva Addendum",type="primary",use_container_width=True)
         if submitted:
             save_addendum_orders(selected_code,values);st.success("Dati Addendum salvati.");st.rerun()
     else:
         rows=[]
         total_saving=0.0
-        for code,label,note in products:
+        for code,label,note,default_promo in products:
             item=saved.get(code,{})
-            qty=int(item.get("qty",0)); lp=float(item.get("list_price",0)); pp=float(item.get("promo_price",0))
-            if qty<=0 and lp<=0 and pp<=0: continue
-            saving=max(lp-pp,0)*qty
+            qty=int(item.get("qty",0)); lp=float(item.get("list_price",0)); pp=float(item.get("promo_price",0)) or float(default_promo); gift=float(item.get("gift_value",0))
+            if qty<=0 and lp<=0 and pp<=0 and gift<=0: continue
+            list_total=lp*qty
+            promo_total=max((pp*qty)-gift,0)
+            saving=max(list_total-promo_total,0)
             total_saving+=saving
-            rows.append({"Prodotto":label,"Pezzi ordinati":qty,"Listino unitario":euro(lp),"Promo unitaria":euro(pp),"Risparmio":euro(saving)})
+            rows.append({"Prodotto":label,"Pezzi ordinati":qty,"Listino unitario":euro(lp),"Promo unitaria":euro(pp),"Valore omaggio":euro(gift),"Totale promo netto":euro(promo_total),"Risparmio":euro(saving)})
         if rows:
             st.metric("Risparmio complessivo stimato",euro(total_saving))
             st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
