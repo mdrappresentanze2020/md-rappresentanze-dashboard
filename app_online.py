@@ -169,6 +169,7 @@ def ensure_addendum_table():
             session.execute(text("ALTER TABLE addendum_orders ADD COLUMN IF NOT EXISTS list_price NUMERIC NOT NULL DEFAULT 0"))
             session.execute(text("ALTER TABLE addendum_orders ADD COLUMN IF NOT EXISTS promo_price NUMERIC NOT NULL DEFAULT 0"))
             session.execute(text("ALTER TABLE addendum_orders ADD COLUMN IF NOT EXISTS gift_value NUMERIC NOT NULL DEFAULT 0"))
+            session.execute(text("ALTER TABLE addendum_orders ADD COLUMN IF NOT EXISTS quantity_discount NUMERIC NOT NULL DEFAULT 0"))
             session.commit()
     return run_db_with_retry(operation)
 
@@ -176,8 +177,8 @@ def load_addendum_orders(customer_code):
     ensure_addendum_table()
     def operation(connection):
         with connection.session as session:
-            rows = session.execute(text("SELECT product_code,ordered_qty,list_price,promo_price,gift_value FROM addendum_orders WHERE customer_code=:code"), {"code":customer_code}).mappings().all()
-            return {r["product_code"]: {"qty":int(r["ordered_qty"] or 0),"list_price":float(r["list_price"] or 0),"promo_price":float(r["promo_price"] or 0),"gift_value":float(r["gift_value"] or 0)} for r in rows}
+            rows = session.execute(text("SELECT product_code,ordered_qty,list_price,promo_price,gift_value,quantity_discount FROM addendum_orders WHERE customer_code=:code"), {"code":customer_code}).mappings().all()
+            return {r["product_code"]: {"qty":int(r["ordered_qty"] or 0),"list_price":float(r["list_price"] or 0),"promo_price":float(r["promo_price"] or 0),"gift_value":float(r["gift_value"] or 0),"quantity_discount":float(r["quantity_discount"] or 0)} for r in rows}
     return run_db_with_retry(operation)
 
 def save_addendum_orders(customer_code, values):
@@ -185,7 +186,7 @@ def save_addendum_orders(customer_code, values):
     def operation(connection):
         with connection.session as session:
             for product_code, item in values.items():
-                session.execute(text("""INSERT INTO addendum_orders(customer_code,product_code,ordered_qty,list_price,promo_price,gift_value,updated_at) VALUES(:code,:product,:qty,:list_price,:promo_price,:gift_value,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,product_code) DO UPDATE SET ordered_qty=:qty,list_price=:list_price,promo_price=:promo_price,gift_value=:gift_value,updated_at=CURRENT_TIMESTAMP"""), {"code":customer_code,"product":product_code,"qty":int(item["qty"]),"list_price":float(item["list_price"]),"promo_price":float(item["promo_price"]),"gift_value":float(item.get("gift_value",0))})
+                session.execute(text("""INSERT INTO addendum_orders(customer_code,product_code,ordered_qty,list_price,promo_price,gift_value,quantity_discount,updated_at) VALUES(:code,:product,:qty,:list_price,:promo_price,:gift_value,:quantity_discount,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,product_code) DO UPDATE SET ordered_qty=:qty,list_price=:list_price,promo_price=:promo_price,gift_value=:gift_value,quantity_discount=:quantity_discount,updated_at=CURRENT_TIMESTAMP"""), {"code":customer_code,"product":product_code,"qty":int(item["qty"]),"list_price":float(item["list_price"]),"promo_price":float(item["promo_price"]),"gift_value":float(item.get("gift_value",0)),"quantity_discount":float(item.get("quantity_discount",0))})
             session.commit()
     return run_db_with_retry(operation)
 
@@ -654,6 +655,30 @@ def order_pdfs_page():
         st.dataframe(status_df,use_container_width=True,hide_index=True)
     else:
         st.info("Nessun PDF caricato.")
+def ensure_addendum_bonus_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS addendum_bonus(customer_code TEXT NOT NULL,family_code TEXT NOT NULL,bonus_qty INTEGER NOT NULL DEFAULT 0,bonus_net_value NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,family_code))"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def load_addendum_bonus(customer_code):
+    ensure_addendum_bonus_table()
+    def operation(connection):
+        with connection.session as session:
+            rows=session.execute(text("SELECT family_code,bonus_qty,bonus_net_value FROM addendum_bonus WHERE customer_code=:code"),{"code":customer_code}).mappings().all()
+            return {r["family_code"]:{"qty":int(r["bonus_qty"] or 0),"net":float(r["bonus_net_value"] or 0)} for r in rows}
+    return run_db_with_retry(operation)
+
+def save_addendum_bonus(customer_code, values):
+    ensure_addendum_bonus_table()
+    def operation(connection):
+        with connection.session as session:
+            for family,item in values.items():
+                session.execute(text("""INSERT INTO addendum_bonus(customer_code,family_code,bonus_qty,bonus_net_value,updated_at) VALUES(:code,:family,:qty,:net,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,family_code) DO UPDATE SET bonus_qty=:qty,bonus_net_value=:net,updated_at=CURRENT_TIMESTAMP"""),{"code":customer_code,"family":family,"qty":int(item["qty"]),"net":float(item["net"])})
+            session.commit()
+    return run_db_with_retry(operation)
+
 def addendum_products():
     return [
         ("EDGE_F_2.1", "EDGE F (R290) · WiSAN-PME 1 S 2.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
@@ -698,37 +723,75 @@ def addendum_page(user):
     if is_admin:
         values={}
         with st.form(f"addendum_form_{selected_code}"):
-            st.subheader("Quantità e prezzi")
+            st.subheader("Quantità e prezzi netti")
             for code,label,note,default_promo in products:
                 current=saved.get(code,{})
                 st.markdown(f"**{label}**")
                 if note: st.caption(note)
-                c1,c2,c3,c4=st.columns(4)
+                is_evo = code.startswith("WISAN_YME_")
+                if is_evo:
+                    c1,c2,c3,c4=st.columns(4)
+                else:
+                    c1,c2=st.columns([1,2])
                 qty=c1.number_input("Pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{selected_code}_{code}")
-                list_price=c2.number_input("Prezzo di listino (€)",min_value=0.0,step=10.0,value=float(current.get("list_price",0)),format="%.2f",key=f"al_{selected_code}_{code}")
-                promo_saved=float(current.get("promo_price",0)); promo_default=promo_saved if promo_saved>0 else float(default_promo)
-                promo_price=c3.number_input("Prezzo promo (€)",min_value=0.0,step=10.0,value=promo_default,format="%.2f",key=f"ap_{selected_code}_{code}")
-                gift_value=c4.number_input("Valore omaggio (€)",min_value=0.0,step=10.0,value=float(current.get("gift_value",0)),format="%.2f",key=f"ag_{selected_code}_{code}")
-                values[code]={"qty":qty,"list_price":list_price,"promo_price":promo_price,"gift_value":gift_value}
+                net_saved=float(current.get("promo_price",0)); net_default=net_saved if net_saved>0 else float(default_promo)
+                net_price=c2.number_input("Prezzo netto (€)",min_value=0.0,step=10.0,value=net_default,format="%.2f",key=f"an_{selected_code}_{code}")
+                quantity_discount=0.0
+                if is_evo:
+                    quantity_discount=c3.number_input("Sconto quantità (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(current.get("quantity_discount",0)),format="%.2f",key=f"ad_{selected_code}_{code}")
+                    evo_total=qty*net_price*(1-(quantity_discount/100))
+                    c4.metric("Totale",euro(evo_total))
+                values[code]={"qty":qty,"list_price":0.0,"promo_price":net_price,"gift_value":0.0,"quantity_discount":quantity_discount}
             submitted=st.form_submit_button("Salva Addendum",type="primary",use_container_width=True)
         if submitted:
             save_addendum_orders(selected_code,values);st.success("Dati Addendum salvati.");st.rerun()
+
+        bonus_saved=load_addendum_bonus(selected_code)
+        with st.form(f"addendum_bonus_{selected_code}"):
+            st.subheader("Promo per lotti misti")
+            b1,b2=st.columns(2)
+            edge_qty=b1.number_input("EDGE F · quantità omaggi maturati",min_value=0,step=1,value=int(bonus_saved.get("EDGE_F",{}).get("qty",0)),help="1 omaggio ogni 5 pezzi misti ordinati; multipli di 5 maturano più omaggi.")
+            edge_net=b2.number_input("EDGE F · valore netto unitario omaggio (€)",min_value=0.0,step=10.0,value=float(bonus_saved.get("EDGE_F",{}).get("net",0)),format="%.2f")
+            a1,a2=st.columns(2)
+            aqua_qty=a1.number_input("AQUA F · quantità omaggi maturati",min_value=0,step=1,value=int(bonus_saved.get("AQUA_F",{}).get("qty",0)),help="1 omaggio ogni 11 pezzi misti ordinati; multipli di 11 maturano più omaggi.")
+            aqua_net=a2.number_input("AQUA F · valore netto unitario omaggio (€)",min_value=0.0,step=10.0,value=float(bonus_saved.get("AQUA_F",{}).get("net",0)),format="%.2f")
+            save_bonus=st.form_submit_button("Salva valori promo",type="primary",use_container_width=True)
+        if save_bonus:
+            save_addendum_bonus(selected_code,{"EDGE_F":{"qty":edge_qty,"net":edge_net},"AQUA_F":{"qty":aqua_qty,"net":aqua_net}});st.success("Valori promo salvati.");st.rerun()
     else:
         rows=[]
-        total_saving=0.0
+        total_net=0.0
         for code,label,note,default_promo in products:
             item=saved.get(code,{})
-            qty=int(item.get("qty",0)); lp=float(item.get("list_price",0)); pp=float(item.get("promo_price",0)) or float(default_promo); gift=float(item.get("gift_value",0))
-            if qty<=0 and lp<=0 and pp<=0 and gift<=0: continue
-            list_total=lp*qty
-            promo_total=max((pp*qty)-gift,0)
-            saving=max(list_total-promo_total,0)
-            total_saving+=saving
-            rows.append({"Prodotto":label,"Pezzi ordinati":qty,"Listino unitario":euro(lp),"Promo unitaria":euro(pp),"Valore omaggio":euro(gift),"Totale promo netto":euro(promo_total),"Risparmio":euro(saving)})
+            qty=int(item.get("qty",0)); net=float(item.get("promo_price",0)) or float(default_promo); discount=float(item.get("quantity_discount",0))
+            if qty<=0 and net<=0: continue
+            row_total=qty*net*(1-(discount/100))
+            total_net+=row_total
+            row={"Prodotto":label,"Pezzi ordinati":qty,"Prezzo netto":euro(net),"Totale":euro(row_total)}
+            if code.startswith("WISAN_YME_"):
+                row["Sconto quantità"]=f"{discount:.2f}%".replace(".",",")
+            else:
+                row["Sconto quantità"]=""
+            rows.append(row)
+        bonus=load_addendum_bonus(selected_code)
+        edge_bonus=bonus.get("EDGE_F",{}); aqua_bonus=bonus.get("AQUA_F",{})
+        edge_value=int(edge_bonus.get("qty",0))*float(edge_bonus.get("net",0))
+        aqua_value=int(aqua_bonus.get("qty",0))*float(aqua_bonus.get("net",0))
+        promo_value=edge_value+aqua_value
+        final_total=max(total_net-promo_value,0)
+        c1,c2,c3=st.columns(3)
+        c1.metric("Totale netto prodotti",euro(total_net))
+        c2.metric("Valore promo / omaggi",euro(promo_value))
+        c3.metric("Totale netto dopo promo",euro(final_total))
         if rows:
-            st.metric("Risparmio complessivo stimato",euro(total_saving))
             st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
-        else:
+        if promo_value>0:
+            promo_rows=[]
+            if edge_value>0: promo_rows.append({"Promo":"EDGE F · 1 omaggio ogni 5 pezzi misti","Quantità omaggi":int(edge_bonus.get("qty",0)),"Valore netto unitario":euro(float(edge_bonus.get("net",0))),"Valore detratto":euro(edge_value)})
+            if aqua_value>0: promo_rows.append({"Promo":"AQUA F · 1 omaggio ogni 11 pezzi misti","Quantità omaggi":int(aqua_bonus.get("qty",0)),"Valore netto unitario":euro(float(aqua_bonus.get("net",0))),"Valore detratto":euro(aqua_value)})
+            st.subheader("Vantaggio promozionale")
+            st.dataframe(pd.DataFrame(promo_rows),use_container_width=True,hide_index=True)
+        if not rows:
             st.info("Nessun dato Addendum ancora disponibile.")
 
 def targets_page():
