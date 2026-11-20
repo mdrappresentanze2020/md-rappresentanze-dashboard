@@ -891,7 +891,11 @@ def bilico_page(user):
                     st.markdown(f"**{size}**")
                     st.caption(f"Netto Bilico {euro(net)}")
                     quantities[(line,size)]=st.number_input("Quantità",min_value=0,step=1,value=int(saved.get((line,size),0)),key=f"bilico_{code}_{line}_{size}")
-            discounts[line]=st.number_input(f"{info['title']} · Extra sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(saved.get((line,"EXTRA_DISCOUNT"),0)),format="%.2f",key=f"bilico_discount_{code}_{line}") if is_admin else float(saved.get((line,"EXTRA_DISCOUNT"),0))
+            if is_admin:
+                discounts[line]=st.number_input(f"{info['title']} · Extra sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(saved.get((line,"EXTRA_DISCOUNT"),0)),format="%.2f",key=f"bilico_discount_{code}_{line}")
+            else:
+                discounts[line]=float(saved.get((line,"EXTRA_DISCOUNT"),0))
+                st.metric(f"{info['title']} · Extra sconto",f"{discounts[line]:.2f}%".replace(".",","))
         save=st.form_submit_button("Salva quantità Bilico",type="primary",use_container_width=True)
     if save:
         if is_admin:
@@ -1226,10 +1230,25 @@ def addendum_page(user, section):
                 st.success("Addendum Promo salvato.");st.rerun()
         else:
             quantities={}
+            client_edge_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in edge_products)
+            client_aqua_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in aqua_products)
+            client_edge_discount=edge_quantity_discount(client_edge_qty)
+            client_aqua_discount=aqua_quantity_discount(client_aqua_qty)
             with st.form(f"promo_client_{selected_code}"):
-                st.subheader("Modifica quantità ordinate")
-                for code,label,note,default_net in active_products:
-                    quantities[code]=st.number_input(label,min_value=0,step=1,value=int(saved.get(code,{}).get("qty",0)),key=f"cq_{section}_{selected_code}_{code}")
+                for family_name,family_products,auto_discount in [
+                    ("EDGE F",edge_products,client_edge_discount),
+                    ("AQUA F",aqua_products,client_aqua_discount)
+                ]:
+                    st.subheader(family_name)
+                    for code,label,note,list_price in family_products:
+                        c1,c2,c3,c4,c5=st.columns(5)
+                        quantities[code]=c1.number_input(f"{label} · pezzi ordinati",min_value=0,step=1,value=int(saved.get(code,{}).get("qty",0)),key=f"cq_{section}_{selected_code}_{code}")
+                        list_price=float(list_price)
+                        c2.metric("Prezzo di listino",euro(list_price))
+                        c3.metric("Sconto base","60%")
+                        c4.metric("Sconto quantità",f"{auto_discount:.0f}%")
+                        net=list_price*0.40*(1-auto_discount/100)
+                        c5.metric("Totale",euro(quantities[code]*net))
                 submitted=st.form_submit_button("Salva quantità",type="primary",use_container_width=True)
             if submitted:
                 save_addendum_quantities(selected_code,quantities);st.success("Quantità aggiornate.");st.rerun()
@@ -1258,10 +1277,19 @@ def addendum_page(user, section):
                 save_addendum_orders(selected_code,values);st.success("Addendum EDGE EVO 2.0 salvato.");st.rerun()
         else:
             quantities={}
+            saved_discounts=[float(saved.get(p[0],{}).get("quantity_discount",0)) for p in evo_products]
+            client_discount=max(saved_discounts or [0.0])
             with st.form(f"evo_client_{selected_code}"):
-                st.subheader("Modifica quantità ordinate")
+                st.subheader("EDGE EVO 2.0")
                 for code,label,note,default_net in evo_products:
-                    quantities[code]=st.number_input(label,min_value=0,step=1,value=int(saved.get(code,{}).get("qty",0)),key=f"cq_evo_{selected_code}_{code}")
+                    item=saved.get(code,{})
+                    base=float(item.get("promo_price",0)) or float(default_net)
+                    effective=base*(1-client_discount/100)
+                    c1,c2,c3=st.columns(3)
+                    quantities[code]=c1.number_input(f"{label} · quantità",min_value=0,step=1,value=int(item.get("qty",0)),key=f"cq_evo_{selected_code}_{code}")
+                    c2.metric("Prezzo netto",euro(effective))
+                    c3.metric("Totale",euro(quantities[code]*effective))
+                st.metric("Sconto quantità cumulativo",f"{client_discount:.2f}%".replace(".",","))
                 submitted=st.form_submit_button("Salva quantità",type="primary",use_container_width=True)
             if submitted:
                 save_addendum_quantities(selected_code,quantities);st.success("Quantità aggiornate.");st.rerun()
