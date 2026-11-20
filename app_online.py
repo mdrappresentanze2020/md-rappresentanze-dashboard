@@ -1042,13 +1042,16 @@ def save_addendum_bonus(customer_code, values):
 
 def addendum_products():
     return [
-        ("EDGE_F_2.1", "EDGE F (R290) · WiSAN-PME 1 S 2.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
-        ("EDGE_F_3.1", "EDGE F (R290) · WiSAN-PME 1 S 3.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
-        ("EDGE_F_4.1", "EDGE F (R290) · WiSAN-PME 1 S 4.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
-        ("EDGE_F_5.1", "EDGE F (R290) · WiSAN-PME 1 S 5.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
-        ("EDGE_F_6.1", "EDGE F (R290) · WiSAN-PME 1 S 6.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
-        ("EDGE_F_7.1", "EDGE F (R290) · WiSAN-PME 1 S 7.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
-        ("EDGE_F_8.1", "EDGE F (R290) · WiSAN-PME 1 S 8.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 0.0),
+        ("EDGE_F_2.1", "EDGE F (R290) · WiSAN-PME 1 S 2.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 5114.0),
+        ("EDGE_F_3.1", "EDGE F (R290) · WiSAN-PME 1 S 3.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 5911.0),
+        ("EDGE_F_4.1", "EDGE F (R290) · WiSAN-PME 1 S 4.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 6443.0),
+        ("EDGE_F_5.1", "EDGE F (R290) · WiSAN-PME 1 S 5.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 7362.0),
+        ("EDGE_F_6.1", "EDGE F (R290) · WiSAN-PME 1 S 6.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 8380.0),
+        ("EDGE_F_6.1T", "EDGE F (R290) · WiSAN-PME 1 S 6.1T", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 8654.0),
+        ("EDGE_F_7.1", "EDGE F (R290) · WiSAN-PME 1 S 7.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 9244.0),
+        ("EDGE_F_7.1T", "EDGE F (R290) · WiSAN-PME 1 S 7.1T", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 9539.0),
+        ("EDGE_F_8.1", "EDGE F (R290) · WiSAN-PME 1 S 8.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 9658.0),
+        ("EDGE_F_8.1T", "EDGE F (R290) · WiSAN-PME 1 S 8.1T", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 9982.0),
         ("AQUA_F_100", "AQUA F (R290) · DSDH-P AQ 1 S 100", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
         ("AQUA_F_190", "AQUA F (R290) · DSDH-P AQ 1 S 190", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
         ("AQUA_F_190S", "AQUA F (R290) · DSDH-P AQ 1 S 190S", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
@@ -1104,7 +1107,13 @@ def addendum_page(user, section):
         gift_net=float(bonus.get("net",0))
         for code,label,note,default_net in family_products:
             item=saved.get(code,{})
-            qty=int(item.get("qty",0)); net=float(item.get("promo_price",0)) or float(default_net)
+            qty=int(item.get("qty",0))
+            if bonus_key=="EDGE_F":
+                list_price=float(default_net)
+                discount=float(item.get("quantity_discount",0))
+                net=list_price*(1-discount/100)
+            else:
+                net=float(item.get("promo_price",0)) or float(default_net)
             total_qty+=qty; order_total+=qty*net
             rows.append((code,label,qty,net))
         gifts=total_qty//threshold
@@ -1135,10 +1144,20 @@ def addendum_page(user, section):
                     st.subheader(family_name)
                     for code,label,note,default_net in family_products:
                         current=saved.get(code,{})
-                        c1,c2=st.columns([2,1])
-                        qty=c1.number_input(f"{label} · pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{section}_{selected_code}_{code}")
-                        net=c2.number_input(f"{label} · prezzo netto (€)",min_value=0.0,step=10.0,value=float(current.get("promo_price",0)) or float(default_net),format="%.2f",key=f"an_{section}_{selected_code}_{code}")
-                        values[code]={"qty":qty,"list_price":0.0,"promo_price":net,"gift_value":0.0,"quantity_discount":0.0}
+                        if family_name=="EDGE F":
+                            c1,c2,c3,c4=st.columns(4)
+                            qty=c1.number_input(f"{label} · pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{section}_{selected_code}_{code}")
+                            list_price=float(default_net)
+                            c2.metric("Prezzo di listino",euro(list_price))
+                            discount=c3.number_input(f"{label} · sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(current.get("quantity_discount",0)),format="%.2f",key=f"disc_{section}_{selected_code}_{code}")
+                            net=list_price*(1-discount/100)
+                            c4.metric("Totale",euro(qty*net))
+                            values[code]={"qty":qty,"list_price":list_price,"promo_price":net,"gift_value":0.0,"quantity_discount":discount}
+                        else:
+                            c1,c2=st.columns([2,1])
+                            qty=c1.number_input(f"{label} · pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{section}_{selected_code}_{code}")
+                            net=c2.number_input(f"{label} · prezzo netto (€)",min_value=0.0,step=10.0,value=float(current.get("promo_price",0)) or float(default_net),format="%.2f",key=f"an_{section}_{selected_code}_{code}")
+                            values[code]={"qty":qty,"list_price":0.0,"promo_price":net,"gift_value":0.0,"quantity_discount":0.0}
                 st.subheader("Valori omaggio")
                 b1,b2=st.columns(2)
                 edge_gift_net=b1.number_input("Valore netto unitario omaggio EDGE F 4.1 (€)",min_value=0.0,step=10.0,value=float(bonus_saved.get("EDGE_F",{}).get("net",0)),format="%.2f")
