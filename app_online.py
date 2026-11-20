@@ -1038,7 +1038,8 @@ def superpre_page(user):
 def ensure_addendum_bonus_table():
     def operation(connection):
         with connection.session as session:
-            session.execute(text("""CREATE TABLE IF NOT EXISTS addendum_bonus(customer_code TEXT NOT NULL,family_code TEXT NOT NULL,bonus_qty INTEGER NOT NULL DEFAULT 0,bonus_net_value NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,family_code))"""))
+            session.execute(text("""CREATE TABLE IF NOT EXISTS addendum_bonus(customer_code TEXT NOT NULL,family_code TEXT NOT NULL,bonus_qty INTEGER NOT NULL DEFAULT 0,bonus_net_value NUMERIC NOT NULL DEFAULT 0,extra_discount NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(customer_code,family_code))"""))
+            session.execute(text("ALTER TABLE addendum_bonus ADD COLUMN IF NOT EXISTS extra_discount NUMERIC NOT NULL DEFAULT 0"))
             session.commit()
     return run_db_with_retry(operation)
 
@@ -1046,8 +1047,8 @@ def load_addendum_bonus(customer_code):
     ensure_addendum_bonus_table()
     def operation(connection):
         with connection.session as session:
-            rows=session.execute(text("SELECT family_code,bonus_qty,bonus_net_value FROM addendum_bonus WHERE customer_code=:code"),{"code":customer_code}).mappings().all()
-            return {r["family_code"]:{"qty":int(r["bonus_qty"] or 0),"net":float(r["bonus_net_value"] or 0)} for r in rows}
+            rows=session.execute(text("SELECT family_code,bonus_qty,bonus_net_value,extra_discount FROM addendum_bonus WHERE customer_code=:code"),{"code":customer_code}).mappings().all()
+            return {r["family_code"]:{"qty":int(r["bonus_qty"] or 0),"net":float(r["bonus_net_value"] or 0),"extra_discount":float(r["extra_discount"] or 0)} for r in rows}
     return run_db_with_retry(operation)
 
 def save_addendum_bonus(customer_code, values):
@@ -1055,7 +1056,7 @@ def save_addendum_bonus(customer_code, values):
     def operation(connection):
         with connection.session as session:
             for family,item in values.items():
-                session.execute(text("""INSERT INTO addendum_bonus(customer_code,family_code,bonus_qty,bonus_net_value,updated_at) VALUES(:code,:family,:qty,:net,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,family_code) DO UPDATE SET bonus_qty=:qty,bonus_net_value=:net,updated_at=CURRENT_TIMESTAMP"""),{"code":customer_code,"family":family,"qty":int(item["qty"]),"net":float(item["net"])})
+                session.execute(text("""INSERT INTO addendum_bonus(customer_code,family_code,bonus_qty,bonus_net_value,extra_discount,updated_at) VALUES(:code,:family,:qty,:net,:extra,CURRENT_TIMESTAMP) ON CONFLICT(customer_code,family_code) DO UPDATE SET bonus_qty=:qty,bonus_net_value=:net,extra_discount=:extra,updated_at=CURRENT_TIMESTAMP"""),{"code":customer_code,"family":family,"qty":int(item["qty"]),"net":float(item["net"]),"extra":float(item.get("extra_discount",0))})
             session.commit()
     return run_db_with_retry(operation)
 
@@ -1146,16 +1147,17 @@ def addendum_page(user, section):
         rows=[]; order_total=0.0; total_qty=0
         total_family_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in family_products)
         quantity_discount=edge_quantity_discount(total_family_qty) if bonus_key=="EDGE_F" else aqua_quantity_discount(total_family_qty)
+        extra_discount=float(bonus_saved.get(bonus_key,{}).get("extra_discount",0) or 0)
         gift_net=0.0
         for code,label,note,list_price in family_products:
             qty=int(saved.get(code,{}).get("qty",0))
             list_price=float(list_price)
-            net=list_price*0.40*(1-quantity_discount/100)
+            net=list_price*0.40*(1-extra_discount/100)*(1-quantity_discount/100)
             total_qty+=qty; order_total+=qty*net
             rows.append((code,label,qty,list_price,net))
         gifts=total_qty//threshold
         if bonus_key=="EDGE_F":
-            gift_net=6443.0*0.40*(1-quantity_discount/100)
+            gift_net=6443.0*0.40*(1-extra_discount/100)*(1-quantity_discount/100)
         else:
             ordered_nets=[net for _,_,qty,_,net in rows if qty>0]
             gift_net=min(ordered_nets) if ordered_nets else 0.0
@@ -1169,6 +1171,7 @@ def addendum_page(user, section):
                 "Quantità":qty,
                 "Prezzo di listino":euro(list_price),
                 "Sconto base":"60%",
+                "Extra sconto":f"{extra_discount:.2f}%".replace(".",","),
                 "Sconto quantità":f"{quantity_discount:.0f}%",
                 "Prezzo netto":euro(effective),
                 "Totale":euro(qty*effective)
@@ -1194,6 +1197,10 @@ def addendum_page(user, section):
             saved_aqua_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in aqua_products)
             automatic_aqua_discount=aqua_quantity_discount(saved_aqua_qty)
             with st.form(f"promo_admin_{selected_code}"):
+                st.subheader("Extra sconti")
+                ex1,ex2=st.columns(2)
+                edge_extra=ex1.number_input("EDGE F · Extra sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(bonus_saved.get("EDGE_F",{}).get("extra_discount",0) or 0),format="%.2f")
+                aqua_extra=ex2.number_input("AQUA F · Extra sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(bonus_saved.get("AQUA_F",{}).get("extra_discount",0) or 0),format="%.2f")
                 for family_name,family_products in [("EDGE F",edge_products),("AQUA F",aqua_products)]:
                     st.subheader(family_name)
                     for code,label,note,default_net in family_products:
@@ -1205,7 +1212,7 @@ def addendum_page(user, section):
                             c2.metric("Prezzo di listino",euro(list_price))
                             c3.metric("Sconto base","60%")
                             c4.metric("Sconto quantità",f"{automatic_edge_discount:.0f}%")
-                            net=list_price*0.40*(1-automatic_edge_discount/100)
+                            net=list_price*0.40*(1-edge_extra/100)*(1-automatic_edge_discount/100)
                             c5.metric("Totale",euro(qty*net))
                             values[code]={"qty":qty,"list_price":list_price,"promo_price":net,"gift_value":0.0,"quantity_discount":automatic_edge_discount}
                         else:
@@ -1215,13 +1222,13 @@ def addendum_page(user, section):
                             c2.metric("Prezzo di listino",euro(list_price))
                             c3.metric("Sconto base","60%")
                             c4.metric("Sconto quantità",f"{automatic_aqua_discount:.0f}%")
-                            net=list_price*0.40*(1-automatic_aqua_discount/100)
+                            net=list_price*0.40*(1-aqua_extra/100)*(1-automatic_aqua_discount/100)
                             c5.metric("Totale",euro(qty*net))
                             values[code]={"qty":qty,"list_price":list_price,"promo_price":net,"gift_value":0.0,"quantity_discount":automatic_aqua_discount}
                 st.subheader("Valori omaggio")
                 b1,b2=st.columns(2)
                 edge_41_extra=automatic_edge_discount
-                edge_gift_net=6443.0*0.40*(1-edge_41_extra/100)
+                edge_gift_net=6443.0*0.40*(1-edge_extra/100)*(1-edge_41_extra/100)
                 b1.metric("Omaggio EDGE F 4.1 automatico",euro(edge_gift_net),delta=f"60% + {edge_41_extra:.2f}% sconto quantità".replace(".",","))
                 aqua_ordered_nets=[values[p[0]]["promo_price"] for p in aqua_products if values[p[0]]["qty"]>0]
                 aqua_gift_net=min(aqua_ordered_nets) if aqua_ordered_nets else 0.0
@@ -1232,16 +1239,16 @@ def addendum_page(user, section):
                 final_edge_discount=edge_quantity_discount(edge_qty)
                 for edge_code,_,_,edge_list in edge_products:
                     values[edge_code]["quantity_discount"]=final_edge_discount
-                    values[edge_code]["promo_price"]=float(edge_list)*0.40*(1-final_edge_discount/100)
-                edge_gift_net=6443.0*0.40*(1-final_edge_discount/100)
+                    values[edge_code]["promo_price"]=float(edge_list)*0.40*(1-edge_extra/100)*(1-final_edge_discount/100)
+                edge_gift_net=6443.0*0.40*(1-edge_extra/100)*(1-final_edge_discount/100)
                 final_aqua_discount=aqua_quantity_discount(aqua_qty)
                 for aqua_code,_,_,aqua_list in aqua_products:
                     values[aqua_code]["quantity_discount"]=final_aqua_discount
-                    values[aqua_code]["promo_price"]=float(aqua_list)*0.40*(1-final_aqua_discount/100)
+                    values[aqua_code]["promo_price"]=float(aqua_list)*0.40*(1-aqua_extra/100)*(1-final_aqua_discount/100)
                 aqua_ordered_nets=[values[p[0]]["promo_price"] for p in aqua_products if values[p[0]]["qty"]>0]
                 aqua_gift_net=min(aqua_ordered_nets) if aqua_ordered_nets else 0.0
                 save_addendum_orders(selected_code,values)
-                save_addendum_bonus(selected_code,{"EDGE_F":{"qty":edge_qty//5,"net":edge_gift_net},"AQUA_F":{"qty":aqua_qty//11,"net":aqua_gift_net}})
+                save_addendum_bonus(selected_code,{"EDGE_F":{"qty":edge_qty//5,"net":edge_gift_net,"extra_discount":edge_extra},"AQUA_F":{"qty":aqua_qty//11,"net":aqua_gift_net,"extra_discount":aqua_extra}})
                 st.success("Addendum Promo salvato.");st.rerun()
         else:
             quantities={}
@@ -1249,7 +1256,12 @@ def addendum_page(user, section):
             client_aqua_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in aqua_products)
             client_edge_discount=edge_quantity_discount(client_edge_qty)
             client_aqua_discount=aqua_quantity_discount(client_aqua_qty)
+            edge_extra=float(bonus_saved.get("EDGE_F",{}).get("extra_discount",0) or 0)
+            aqua_extra=float(bonus_saved.get("AQUA_F",{}).get("extra_discount",0) or 0)
             with st.form(f"promo_client_{selected_code}"):
+                ex1,ex2=st.columns(2)
+                ex1.metric("EDGE F · Extra sconto",f"{edge_extra:.2f}%".replace(".",","))
+                ex2.metric("AQUA F · Extra sconto",f"{aqua_extra:.2f}%".replace(".",","))
                 for family_name,family_products,auto_discount in [
                     ("EDGE F",edge_products,client_edge_discount),
                     ("AQUA F",aqua_products,client_aqua_discount)
@@ -1262,7 +1274,8 @@ def addendum_page(user, section):
                         c2.metric("Prezzo di listino",euro(list_price))
                         c3.metric("Sconto base","60%")
                         c4.metric("Sconto quantità",f"{auto_discount:.0f}%")
-                        net=list_price*0.40*(1-auto_discount/100)
+                        family_extra=edge_extra if family_name=="EDGE F" else aqua_extra
+                        net=list_price*0.40*(1-family_extra/100)*(1-auto_discount/100)
                         c5.metric("Totale",euro(quantities[code]*net))
                 submitted=st.form_submit_button("Salva quantità",type="primary",use_container_width=True)
             if submitted:
