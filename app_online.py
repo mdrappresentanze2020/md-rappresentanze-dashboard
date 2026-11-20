@@ -1502,16 +1502,34 @@ def benefits_summary_page(user):
             text_value=str(value).replace("€","").replace(".","").replace(",",".").strip()
             try: return float(text_value)
             except: return 0.0
-        section_df["_netto_pre"] = section_df["Netto effettivo / pz"].map(parse_euro)
-        section_df["_qty"] = pd.to_numeric(section_df["Quantità"],errors="coerce").fillna(0)
-        # Simulazione: fissiamo lo sconto quantità al valore indicato (4% di default)
-        # per confrontare tutte le famiglie a parità di condizione.
+        # La simulazione non usa le quantità ordinate: usa il lotto minimo della promozione.
+        minimum_qty={"EDGE F":5,"AQUA F":11,"EDGE EVO 2.0":15,"EZCOOL":1,"CRISTALLO2":1,"NATIVE 2":1}.get(family_key,1)
+        section_df["Quantità"] = minimum_qty
+        section_df["_qty"] = float(minimum_qty)
         def pct_num(value):
             try: return float(str(value).replace("%","").replace(",","."))
             except: return 0.0
-        actual_qdisc=section_df["Sconto quantità"].map(pct_num)
-        section_df["_netto_pre"] = section_df.apply(lambda r: r["_netto_pre"] * ((1-simulated_quantity_discount/100)/(1-pct_num(r["Sconto quantità"])/100)) if pct_num(r["Sconto quantità"]) < 100 else r["_netto_pre"],axis=1)
+        section_df["_listino"] = section_df["Listino"].map(parse_euro)
+        section_df["_extra"] = section_df["Extra sconto"].map(pct_num)
+        def simulated_net(row):
+            base=row["_listino"]*(1-row["_extra"]/100)
+            if family_key in ("EDGE F","AQUA F"):
+                base=base*0.40*(1-simulated_quantity_discount/100)
+            elif family_key=="EDGE EVO 2.0":
+                base=base*(1-simulated_quantity_discount/100)
+            # Ripartizione omaggio sul lotto minimo: EDGE F 1 omaggio 4.1 ogni 5;
+            # AQUA F 1 omaggio del prodotto più basso ogni 11. Simulando ogni modello,
+            # il beneficio unitario AQUA equivale a 1/11 del suo netto.
+            if family_key=="EDGE F":
+                gift_unit=6443.0*0.40*(1-row["_extra"]/100)*(1-simulated_quantity_discount/100)
+                base=max(base-gift_unit/5,0)
+            elif family_key=="AQUA F":
+                base=max(base-base/11,0)
+            return base
+        section_df["_netto_pre"] = section_df.apply(simulated_net,axis=1)
         section_df["Sconto quantità"] = f"{simulated_quantity_discount:.2f}%".replace(".",",")
+        section_df["Beneficio omaggio / pz"] = section_df.apply(lambda r:euro((6443.0*0.40*(1-r["_extra"]/100)*(1-simulated_quantity_discount/100))/5) if family_key=="EDGE F" else (euro((r["_listino"]*(1-r["_extra"]/100)*0.40*(1-simulated_quantity_discount/100))/11) if family_key=="AQUA F" else euro(0)),axis=1)
+        section_df["Netto effettivo / pz"] = section_df["_netto_pre"].map(euro)
         section_df["Super Pre Q1 10%"] = section_df["_netto_pre"].map(lambda v:euro(v*super_q1))
         section_df["Premio Q1 3%"] = section_df["_netto_pre"].map(lambda v:euro(v*q1_rate))
         section_df["Premio fine anno"] = section_df["_netto_pre"].map(lambda v:euro(v*annual_rate))
@@ -1533,12 +1551,16 @@ def benefits_summary_page(user):
         m2.metric("Totale netto se Q1",euro(family_after_q1))
         m3.metric("Premio famiglia se Q2",euro(family_prize_q2),delta=f"{q2_scenario_rate*100:.0f}%")
         m4.metric("Totale netto se Q2",euro(family_after_q2))
+        st.caption(f"Quantità simulata per prodotto: {minimum_qty} pezzi (lotto minimo promo; quantità ordinate non considerate).")
         st.caption(rate_text)
         if family_key in ("EDGE F","EDGE EVO 2.0"):
             st.caption("EDGE F ed EDGE EVO 2.0 non beneficiano del Super Pre. Scenario Q1: premio Q1 3% + premio fine anno selezionato. Scenario Q2: solo premio fine anno selezionato.")
         if family_key=="AQUA F":
             st.caption("AQUA F è trattata come HOME: Super Pre 10% se fatturata nel Q1 oppure 5% se fatturata nel Q2, più premio Q1 HOME 3% e premio annuale HOME (100% = 4% nello scenario predefinito).")
-        compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Super Pre Q1 10%","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Super Pre Q2 5%","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
+        if family_key in ("EDGE F","EDGE EVO 2.0"):
+            compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
+        else:
+            compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Super Pre Q1 10%","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Super Pre Q2 5%","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
         st.dataframe(compact,use_container_width=True,hide_index=True)
 
     st.subheader("Riepilogo complessivo")
