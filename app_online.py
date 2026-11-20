@@ -1080,6 +1080,17 @@ def save_addendum_quantities(customer_code, quantities):
             session.commit()
     return run_db_with_retry(operation)
 
+def edge_quantity_discount(total_qty):
+    if total_qty >= 50:
+        return 6.0
+    if total_qty >= 15:
+        return 4.0
+    if total_qty >= 10:
+        return 3.0
+    if total_qty >= 5:
+        return 2.0
+    return 0.0
+
 def addendum_page(user, section):
     st.title("Accordi Addendum")
     is_admin=user.get("role")=="admin"
@@ -1106,16 +1117,16 @@ def addendum_page(user, section):
         bonus=bonus_saved.get(bonus_key,{})
         gift_net=float(bonus.get("net",0))
         if bonus_key=="EDGE_F":
-            item_41=saved.get("EDGE_F_4.1",{})
-            extra_discount_41=max(float(item_41.get("quantity_discount",60.0))-60.0,0.0)
+            total_edge_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in family_products)
+            extra_discount_41=edge_quantity_discount(total_edge_qty)
             gift_net=6443.0*0.40*(1-extra_discount_41/100)
         for code,label,note,default_net in family_products:
             item=saved.get(code,{})
             qty=int(item.get("qty",0))
             if bonus_key=="EDGE_F":
                 list_price=float(default_net)
-                discount=float(item.get("quantity_discount",0))
-                net=list_price*(1-discount/100)
+                quantity_discount=edge_quantity_discount(sum(int(saved.get(p[0],{}).get("qty",0)) for p in family_products))
+                net=list_price*0.40*(1-quantity_discount/100)
             else:
                 net=float(item.get("promo_price",0)) or float(default_net)
             total_qty+=qty; order_total+=qty*net
@@ -1143,20 +1154,23 @@ def addendum_page(user, section):
         active_products=edge_products+aqua_products
         if is_admin:
             values={}
+            saved_edge_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in edge_products)
+            automatic_edge_discount=edge_quantity_discount(saved_edge_qty)
             with st.form(f"promo_admin_{selected_code}"):
                 for family_name,family_products in [("EDGE F",edge_products),("AQUA F",aqua_products)]:
                     st.subheader(family_name)
                     for code,label,note,default_net in family_products:
                         current=saved.get(code,{})
                         if family_name=="EDGE F":
-                            c1,c2,c3,c4=st.columns(4)
+                            c1,c2,c3,c4,c5=st.columns(5)
                             qty=c1.number_input(f"{label} · pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{section}_{selected_code}_{code}")
                             list_price=float(default_net)
                             c2.metric("Prezzo di listino",euro(list_price))
-                            discount=c3.number_input(f"{label} · sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(current.get("quantity_discount",60.0) if current.get("quantity_discount",None) not in (None, 0, 0.0) else 60.0),format="%.2f",key=f"disc_{section}_{selected_code}_{code}")
-                            net=list_price*(1-discount/100)
-                            c4.metric("Totale",euro(qty*net))
-                            values[code]={"qty":qty,"list_price":list_price,"promo_price":net,"gift_value":0.0,"quantity_discount":discount}
+                            c3.metric("Sconto base","60%")
+                            c4.metric("Sconto quantità",f"{automatic_edge_discount:.0f}%")
+                            net=list_price*0.40*(1-automatic_edge_discount/100)
+                            c5.metric("Totale",euro(qty*net))
+                            values[code]={"qty":qty,"list_price":list_price,"promo_price":net,"gift_value":0.0,"quantity_discount":automatic_edge_discount}
                         else:
                             c1,c2=st.columns([2,1])
                             qty=c1.number_input(f"{label} · pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{section}_{selected_code}_{code}")
@@ -1164,16 +1178,19 @@ def addendum_page(user, section):
                             values[code]={"qty":qty,"list_price":0.0,"promo_price":net,"gift_value":0.0,"quantity_discount":0.0}
                 st.subheader("Valori omaggio")
                 b1,b2=st.columns(2)
-                edge_41=values.get("EDGE_F_4.1",{})
-                edge_41_total_discount=float(edge_41.get("quantity_discount",60.0))
-                edge_41_extra=max(edge_41_total_discount-60.0,0.0)
+                edge_41_extra=automatic_edge_discount
                 edge_gift_net=6443.0*0.40*(1-edge_41_extra/100)
                 b1.metric("Omaggio EDGE F 4.1 automatico",euro(edge_gift_net),delta=f"60% + {edge_41_extra:.2f}% sconto quantità".replace(".",","))
                 aqua_gift_net=b2.number_input("Valore netto unitario omaggio AQUA F (€)",min_value=0.0,step=10.0,value=float(bonus_saved.get("AQUA_F",{}).get("net",0)),format="%.2f")
                 submitted=st.form_submit_button("Salva Addendum Promo",type="primary",use_container_width=True)
             if submitted:
-                save_addendum_orders(selected_code,values)
                 edge_qty=sum(values[p[0]]["qty"] for p in edge_products); aqua_qty=sum(values[p[0]]["qty"] for p in aqua_products)
+                final_edge_discount=edge_quantity_discount(edge_qty)
+                for edge_code,_,_,edge_list in edge_products:
+                    values[edge_code]["quantity_discount"]=final_edge_discount
+                    values[edge_code]["promo_price"]=float(edge_list)*0.40*(1-final_edge_discount/100)
+                edge_gift_net=6443.0*0.40*(1-final_edge_discount/100)
+                save_addendum_orders(selected_code,values)
                 save_addendum_bonus(selected_code,{"EDGE_F":{"qty":edge_qty//5,"net":edge_gift_net},"AQUA_F":{"qty":aqua_qty//11,"net":aqua_gift_net}})
                 st.success("Addendum Promo salvato.");st.rerun()
         else:
@@ -1313,4 +1330,3 @@ try:
     if found_code!=code: raise ValueError("Il dataset non corrisponde all'utente collegato.")
     dashboard(data,found_code,name);st.caption(f"Ultimo aggiornamento: {record['updated_at']}")
 except Exception as exc: st.error(f"Errore nella lettura dei dati: {exc}")
-
