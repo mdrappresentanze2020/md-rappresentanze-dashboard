@@ -1052,11 +1052,11 @@ def addendum_products():
         ("EDGE_F_7.1T", "EDGE F (R290) · WiSAN-PME 1 S 7.1T", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 9539.0),
         ("EDGE_F_8.1", "EDGE F (R290) · WiSAN-PME 1 S 8.1", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 9658.0),
         ("EDGE_F_8.1T", "EDGE F (R290) · WiSAN-PME 1 S 8.1T", "Lotto promo EDGE F: minimo 5 pezzi complessivi · 4 fatturati + 1 omaggio WiSAN-PME 1S 4.1", 9982.0),
-        ("AQUA_F_100", "AQUA F (R290) · DSDH-P AQ 1 S 100", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
-        ("AQUA_F_190", "AQUA F (R290) · DSDH-P AQ 1 S 190", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
-        ("AQUA_F_190S", "AQUA F (R290) · DSDH-P AQ 1 S 190S", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
-        ("AQUA_F_300", "AQUA F (R290) · DSDH-P AQ 1 S 300", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
-        ("AQUA_F_300S", "AQUA F (R290) · DSDH-P AQ 1 S 300S", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 0.0),
+        ("AQUA_F_100", "AQUA F (R290) · DSDH-P AQ 1 S 100", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 1736.0),
+        ("AQUA_F_190", "AQUA F (R290) · DSDH-P AQ 1 S 190", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 2874.0),
+        ("AQUA_F_190S", "AQUA F (R290) · DSDH-P AQ 1 S 190S", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 3077.0),
+        ("AQUA_F_300", "AQUA F (R290) · DSDH-P AQ 1 S 300", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 3285.0),
+        ("AQUA_F_300S", "AQUA F (R290) · DSDH-P AQ 1 S 300S", "Lotto AQUA F: minimo 11 pezzi complessivi · 10 fatturati + 1 omaggio taglia inferiore", 3489.0),
         ("WISAN_YME_2.1", "EDGE EVO 2.0 · WiSAN-YME 1S 2.1", "Prezzo netto Addendum", 1306.0),
         ("WISAN_YME_3.1", "EDGE EVO 2.0 · WiSAN-YME 1S 3.1", "Prezzo netto Addendum", 1574.0),
         ("WISAN_YME_4.1", "EDGE EVO 2.0 · WiSAN-YME 1S 4.1", "Prezzo netto Addendum", 1752.0),
@@ -1081,6 +1081,17 @@ def save_addendum_quantities(customer_code, quantities):
     return run_db_with_retry(operation)
 
 def edge_quantity_discount(total_qty):
+    if total_qty >= 50:
+        return 6.0
+    if total_qty >= 15:
+        return 4.0
+    if total_qty >= 10:
+        return 3.0
+    if total_qty >= 5:
+        return 2.0
+    return 0.0
+
+def aqua_quantity_discount(total_qty):
     if total_qty >= 50:
         return 6.0
     if total_qty >= 15:
@@ -1128,10 +1139,15 @@ def addendum_page(user, section):
                 quantity_discount=edge_quantity_discount(sum(int(saved.get(p[0],{}).get("qty",0)) for p in family_products))
                 net=list_price*0.40*(1-quantity_discount/100)
             else:
-                net=float(item.get("promo_price",0)) or float(default_net)
+                list_price=float(default_net)
+                quantity_discount=aqua_quantity_discount(sum(int(saved.get(p[0],{}).get("qty",0)) for p in family_products))
+                net=list_price*0.40*(1-quantity_discount/100)
             total_qty+=qty; order_total+=qty*net
             rows.append((code,label,qty,net))
         gifts=total_qty//threshold
+        if bonus_key=="AQUA_F":
+            ordered_nets=[net for _,_,qty,net in rows if qty>0]
+            gift_net=min(ordered_nets) if ordered_nets else 0.0
         gift_value=gifts*gift_net
         quota=(gift_value/total_qty) if total_qty else 0.0
         display=[]
@@ -1156,6 +1172,8 @@ def addendum_page(user, section):
             values={}
             saved_edge_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in edge_products)
             automatic_edge_discount=edge_quantity_discount(saved_edge_qty)
+            saved_aqua_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in aqua_products)
+            automatic_aqua_discount=aqua_quantity_discount(saved_aqua_qty)
             with st.form(f"promo_admin_{selected_code}"):
                 for family_name,family_products in [("EDGE F",edge_products),("AQUA F",aqua_products)]:
                     st.subheader(family_name)
@@ -1172,16 +1190,23 @@ def addendum_page(user, section):
                             c5.metric("Totale",euro(qty*net))
                             values[code]={"qty":qty,"list_price":list_price,"promo_price":net,"gift_value":0.0,"quantity_discount":automatic_edge_discount}
                         else:
-                            c1,c2=st.columns([2,1])
+                            c1,c2,c3,c4,c5=st.columns(5)
                             qty=c1.number_input(f"{label} · pezzi ordinati",min_value=0,step=1,value=int(current.get("qty",0)),key=f"aq_{section}_{selected_code}_{code}")
-                            net=c2.number_input(f"{label} · prezzo netto (€)",min_value=0.0,step=10.0,value=float(current.get("promo_price",0)) or float(default_net),format="%.2f",key=f"an_{section}_{selected_code}_{code}")
-                            values[code]={"qty":qty,"list_price":0.0,"promo_price":net,"gift_value":0.0,"quantity_discount":0.0}
+                            list_price=float(default_net)
+                            c2.metric("Prezzo di listino",euro(list_price))
+                            c3.metric("Sconto base","60%")
+                            c4.metric("Sconto quantità",f"{automatic_aqua_discount:.0f}%")
+                            net=list_price*0.40*(1-automatic_aqua_discount/100)
+                            c5.metric("Totale",euro(qty*net))
+                            values[code]={"qty":qty,"list_price":list_price,"promo_price":net,"gift_value":0.0,"quantity_discount":automatic_aqua_discount}
                 st.subheader("Valori omaggio")
                 b1,b2=st.columns(2)
                 edge_41_extra=automatic_edge_discount
                 edge_gift_net=6443.0*0.40*(1-edge_41_extra/100)
                 b1.metric("Omaggio EDGE F 4.1 automatico",euro(edge_gift_net),delta=f"60% + {edge_41_extra:.2f}% sconto quantità".replace(".",","))
-                aqua_gift_net=b2.number_input("Valore netto unitario omaggio AQUA F (€)",min_value=0.0,step=10.0,value=float(bonus_saved.get("AQUA_F",{}).get("net",0)),format="%.2f")
+                aqua_ordered_nets=[values[p[0]]["promo_price"] for p in aqua_products if values[p[0]]["qty"]>0]
+                aqua_gift_net=min(aqua_ordered_nets) if aqua_ordered_nets else 0.0
+                b2.metric("Omaggio AQUA F automatico",euro(aqua_gift_net),delta="Valore netto più basso dell'ordine")
                 submitted=st.form_submit_button("Salva Addendum Promo",type="primary",use_container_width=True)
             if submitted:
                 edge_qty=sum(values[p[0]]["qty"] for p in edge_products); aqua_qty=sum(values[p[0]]["qty"] for p in aqua_products)
@@ -1190,6 +1215,12 @@ def addendum_page(user, section):
                     values[edge_code]["quantity_discount"]=final_edge_discount
                     values[edge_code]["promo_price"]=float(edge_list)*0.40*(1-final_edge_discount/100)
                 edge_gift_net=6443.0*0.40*(1-final_edge_discount/100)
+                final_aqua_discount=aqua_quantity_discount(aqua_qty)
+                for aqua_code,_,_,aqua_list in aqua_products:
+                    values[aqua_code]["quantity_discount"]=final_aqua_discount
+                    values[aqua_code]["promo_price"]=float(aqua_list)*0.40*(1-final_aqua_discount/100)
+                aqua_ordered_nets=[values[p[0]]["promo_price"] for p in aqua_products if values[p[0]]["qty"]>0]
+                aqua_gift_net=min(aqua_ordered_nets) if aqua_ordered_nets else 0.0
                 save_addendum_orders(selected_code,values)
                 save_addendum_bonus(selected_code,{"EDGE_F":{"qty":edge_qty//5,"net":edge_gift_net},"AQUA_F":{"qty":aqua_qty//11,"net":aqua_gift_net}})
                 st.success("Addendum Promo salvato.");st.rerun()
