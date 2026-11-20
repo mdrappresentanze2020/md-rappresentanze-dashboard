@@ -1384,6 +1384,14 @@ def addendum_page(user, section):
         m2.metric("Sconto quantità automatico",f"{current_discount:.0f}%")
         m3.metric("Totale EDGE EVO 2.0",euro(total))
 
+def edge_evo_qty_for_discount(discount):
+    d=float(discount or 0)
+    if d >= 6: return 50
+    if d >= 4: return 15
+    if d >= 3: return 10
+    if d >= 2: return 5
+    return 1
+
 def benefits_summary_page(user):
     st.title("Riepilogo vantaggi e simulazione premi")
     is_admin=user.get("role")=="admin"
@@ -1464,7 +1472,7 @@ def benefits_summary_page(user):
     annual_rate={"80% → 1%":0.01,"90% → 2%":0.02,"100% → 4%":0.04,"110% → 5%":0.05,"120% → 6%":0.06}[annual_scenario]
     include_q1=sc2.checkbox("Includi premio Q1 del 3%",value=True)
     q1_rate=0.03 if include_q1 else 0.0
-    simulated_quantity_discount=sc3.number_input("Sconto quantità simulato (%)",min_value=0.0,max_value=100.0,value=4.0,step=0.5,format="%.2f")
+    simulated_quantity_discount=sc3.number_input("Sconto quantità simulato EDGE EVO 2.0 (%)",min_value=0.0,max_value=100.0,value=4.0,step=0.5,format="%.2f")
 
     # Premio Super Pre espresso come incidenza media sul valore programmato.
     super_program=load_superpre_values(code)
@@ -1530,9 +1538,14 @@ def benefits_summary_page(user):
             family_qdisc=edge_quantity_discount(total_sim_qty) if family_key=="EDGE F" else aqua_quantity_discount(total_sim_qty)
             minimum_qty=total_sim_qty
         else:
-            minimum_qty={"EDGE EVO 2.0":15,"EZCOOL":1,"CRISTALLO2":1,"NATIVE 2":1}.get(family_key,1)
+            if family_key=="EDGE EVO 2.0":
+                minimum_qty=edge_evo_qty_for_discount(simulated_quantity_discount)
+                family_qdisc=edge_quantity_discount(minimum_qty)
+            else:
+                minimum_qty={"EZCOOL":1,"CRISTALLO2":1,"NATIVE 2":1}.get(family_key,1)
+                # SPLIT classici (EZCool, Cristallo 2, Native 2) non hanno sconto quantità.
+                family_qdisc=0.0
             section_df["Quantità"]=minimum_qty
-            family_qdisc=simulated_quantity_discount
         section_df["_qty"] = pd.to_numeric(section_df["Quantità"],errors="coerce").fillna(0)
         def pct_num(value):
             try: return float(str(value).replace("%","").replace(",","."))
@@ -1590,6 +1603,8 @@ def benefits_summary_page(user):
             st.caption(f"Simulazione su {total_sim_qty} pezzi complessivi · Sconto quantità {family_qdisc:.0f}% · Omaggi maturati {gifts_matured} · Beneficio omaggio ripartito {euro(gift_share)} / pz")
         if family_key in ("EDGE F","EDGE EVO 2.0"):
             st.caption("EDGE F ed EDGE EVO 2.0 non beneficiano del Super Pre. Scenario Q1: premio Q1 3% + premio fine anno selezionato. Scenario Q2: solo premio fine anno selezionato.")
+        if family_key=="EDGE EVO 2.0":
+            st.caption(f"Sconto quantità simulato {family_qdisc:.0f}% → quantità minima simulata {minimum_qty} pezzi, secondo le soglie EDGE EVO 2.0.")
         if family_key=="AQUA F":
             st.caption("AQUA F è trattata come HOME: Super Pre 10% se fatturata nel Q1 oppure 5% se fatturata nel Q2, più premio Q1 HOME 3% e premio annuale HOME (100% = 4% nello scenario predefinito).")
         show_extra=extra_discount_allowed(code)
@@ -1599,8 +1614,8 @@ def benefits_summary_page(user):
             # EDGE EVO / R32 non prevede omaggi: la colonna beneficio omaggio non viene mostrata.
             compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Netto effettivo / pz","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
         elif family_key in ("EZCOOL","CRISTALLO2","NATIVE 2"):
-            # Su questi SPLIT non è prevista una promozione omaggio: eliminiamo la colonna dal riepilogo.
-            compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Netto effettivo / pz","Super Pre Q1 10%","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Super Pre Q2 5%","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
+            # Su questi SPLIT non sono previsti né omaggio né sconto quantità.
+            compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Netto effettivo / pz","Super Pre Q1 10%","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Super Pre Q2 5%","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
         else:
             compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Super Pre Q1 10%","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Super Pre Q2 5%","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
         if not show_extra and "Extra sconto" in compact.columns:
