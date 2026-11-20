@@ -1443,9 +1443,26 @@ def benefits_summary_page(user):
             total_products+=qty*net
 
     st.subheader("Quanto paghi i singoli prodotti")
-    if rows: st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
-    else: st.info("Inserisci le quantità negli Addendum per vedere i netti effettivi.")
-    st.metric("Totale prodotti dopo tutte le promo",euro(total_products))
+    if rows:
+        summary_df=pd.DataFrame(rows)
+        sections=[
+            ("EDGE F", summary_df[summary_df["Famiglia"]=="EDGE F"]),
+            ("AQUA F", summary_df[summary_df["Famiglia"]=="AQUA F"]),
+            ("EDGE EVO 2.0", summary_df[summary_df["Famiglia"]=="EDGE EVO 2.0"]),
+            ("Bilico · EZCool", summary_df[summary_df["Famiglia"]=="EZCOOL"]),
+            ("Bilico · CRISTALLO 2", summary_df[summary_df["Famiglia"]=="CRISTALLO2"]),
+            ("NATIVE 2", summary_df[summary_df["Famiglia"]=="NATIVE 2"]),
+        ]
+        for section_title,section_df in sections:
+            if section_df.empty: continue
+            st.markdown(f"### {section_title}")
+            compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Totale netto"]].copy()
+            st.dataframe(compact,use_container_width=True,hide_index=True)
+    else:
+        st.info("Inserisci le quantità negli Addendum per vedere i netti effettivi.")
+    ctot1,ctot2=st.columns(2)
+    ctot1.metric("Totale prodotti dopo tutte le promo",euro(total_products))
+    ctot2.metric("Numero famiglie con ordini",len(set(r["Famiglia"] for r in rows)) if rows else 0)
 
     st.subheader("Simulazione premi")
     total_prizes=0.0; prize_rows=[]
@@ -1474,7 +1491,16 @@ def benefits_summary_page(user):
             total_prizes+=annual+q1pr
             prize_rows.append({"Premio":"Accordo commerciale annuale","Target":f"{rate*100:.0f}% maturato","Valore simulato":euro(annual),"Stato":"Maturato" if annual>0 else "Da raggiungere"})
             prize_rows.append({"Premio":"Accordo commerciale Q1","Target":euro(baseline_q1),"Valore simulato":euro(q1pr),"Stato":"Raggiunto" if q1pr>0 else "Da raggiungere"})
-    if prize_rows: st.dataframe(pd.DataFrame(prize_rows),use_container_width=True,hide_index=True)
+    if prize_rows:
+        prize_df=pd.DataFrame(prize_rows)
+        super_df=prize_df[prize_df["Premio"].astype(str).str.startswith("Super Pre")]
+        commercial_df=prize_df[prize_df["Premio"].astype(str).str.startswith("Accordo commerciale")]
+        if not super_df.empty:
+            st.markdown("### Premi Super Pre")
+            st.dataframe(super_df,use_container_width=True,hide_index=True)
+        if not commercial_df.empty:
+            st.markdown("### Premi Accordo Commerciale")
+            st.dataframe(commercial_df,use_container_width=True,hide_index=True)
     st.metric("Totale premi simulati",euro(total_prizes))
     st.caption("Simulazione informativa basata sui dati e sulle condizioni salvate nelle sezioni Addendum. I premi definitivi restano soggetti alle condizioni dell'accordo commerciale.")
 
