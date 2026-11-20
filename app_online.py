@@ -1484,6 +1484,9 @@ def benefits_summary_page(user):
     aqua_q2_active=float(aqua_vals.get("q2",0) or 0)>0
 
     st.subheader("Quanto paghi ogni prodotto dopo tutti i premi")
+    qsim1,qsim2=st.columns(2)
+    sim_edge_qty=qsim1.number_input("Quantità simulata EDGE F",min_value=0,step=1,value=5,help="La logica omaggio e lo sconto quantità vengono ricalcolati sulla quantità simulata.")
+    sim_aqua_qty=qsim2.number_input("Quantità simulata AQUA F",min_value=0,step=1,value=11,help="La logica omaggio e lo sconto quantità vengono ricalcolati sulla quantità simulata.")
     summary_df=pd.DataFrame(rows) if rows else pd.DataFrame()
     family_defs=[
         # EDGE F ed EDGE EVO 2.0 NON beneficiano del Super Pre 10%/5%.
@@ -1518,8 +1521,16 @@ def benefits_summary_page(user):
             text_value=str(value).replace("€","").replace(".","").replace(",",".").strip()
             try: return float(text_value)
             except: return 0.0
-        # La simulazione non usa le quantità ordinate: usa il lotto minimo della promozione.
-        minimum_qty={"EDGE F":5,"AQUA F":11,"EDGE EVO 2.0":15,"EZCOOL":1,"CRISTALLO2":1,"NATIVE 2":1}.get(family_key,1)
+        # EDGE F e AQUA F sono interattivi; le altre famiglie restano su una quantità simulata fissa.
+        if family_key=="EDGE F":
+            minimum_qty=int(sim_edge_qty)
+            family_qdisc=edge_quantity_discount(minimum_qty)
+        elif family_key=="AQUA F":
+            minimum_qty=int(sim_aqua_qty)
+            family_qdisc=aqua_quantity_discount(minimum_qty)
+        else:
+            minimum_qty={"EDGE EVO 2.0":15,"EZCOOL":1,"CRISTALLO2":1,"NATIVE 2":1}.get(family_key,1)
+            family_qdisc=simulated_quantity_discount
         section_df["Quantità"] = minimum_qty
         section_df["_qty"] = float(minimum_qty)
         def pct_num(value):
@@ -1530,21 +1541,25 @@ def benefits_summary_page(user):
         def simulated_net(row):
             base=row["_listino"]*(1-row["_extra"]/100)
             if family_key in ("EDGE F","AQUA F"):
-                base=base*0.40*(1-simulated_quantity_discount/100)
+                base=base*0.40*(1-family_qdisc/100)
             elif family_key=="EDGE EVO 2.0":
-                base=base*(1-simulated_quantity_discount/100)
+                base=base*(1-family_qdisc/100)
             # Ripartizione omaggio sul lotto minimo: EDGE F 1 omaggio 4.1 ogni 5;
             # AQUA F 1 omaggio del prodotto più basso ogni 11. Simulando ogni modello,
             # il beneficio unitario AQUA equivale a 1/11 del suo netto.
             if family_key=="EDGE F":
-                gift_unit=6443.0*0.40*(1-row["_extra"]/100)*(1-simulated_quantity_discount/100)
-                base=max(base-gift_unit/5,0)
+                gift_unit=6443.0*0.40*(1-row["_extra"]/100)*(1-family_qdisc/100)
+                gifts=minimum_qty//5
+                base=max(base-(gift_unit*gifts/minimum_qty if minimum_qty>0 else 0),0)
             elif family_key=="AQUA F":
-                base=max(base-base/11,0)
+                gifts=minimum_qty//11
+                base=max(base-(base*gifts/minimum_qty if minimum_qty>0 else 0),0)
             return base
         section_df["_netto_pre"] = section_df.apply(simulated_net,axis=1)
-        section_df["Sconto quantità"] = f"{simulated_quantity_discount:.2f}%".replace(".",",")
-        section_df["Beneficio omaggio / pz"] = section_df.apply(lambda r:euro((6443.0*0.40*(1-r["_extra"]/100)*(1-simulated_quantity_discount/100))/5) if family_key=="EDGE F" else (euro((r["_listino"]*(1-r["_extra"]/100)*0.40*(1-simulated_quantity_discount/100))/11) if family_key=="AQUA F" else euro(0)),axis=1)
+        section_df["Sconto quantità"] = f"{family_qdisc:.2f}%".replace(".",",")
+        edge_gifts=(minimum_qty//5) if family_key=="EDGE F" else 0
+        aqua_gifts=(minimum_qty//11) if family_key=="AQUA F" else 0
+        section_df["Beneficio omaggio / pz"] = section_df.apply(lambda r:euro(((6443.0*0.40*(1-r["_extra"]/100)*(1-family_qdisc/100))*edge_gifts/minimum_qty) if family_key=="EDGE F" and minimum_qty>0 else (((r["_listino"]*(1-r["_extra"]/100)*0.40*(1-family_qdisc/100))*aqua_gifts/minimum_qty) if family_key=="AQUA F" and minimum_qty>0 else 0)),axis=1)
         section_df["Netto effettivo / pz"] = section_df["_netto_pre"].map(euro)
         section_df["Super Pre Q1 10%"] = section_df["_netto_pre"].map(lambda v:euro(v*super_q1))
         section_df["Premio Q1 3%"] = section_df["_netto_pre"].map(lambda v:euro(v*q1_rate))
