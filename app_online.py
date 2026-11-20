@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 st.set_page_config(page_title="MD Rappresentanze | Clienti", page_icon="📊", layout="wide")
 st.markdown("""<style>
+html,body,[class*="css"],.stApp,.stApp *{font-family:"Aptos Display","Aptos","Segoe UI",Arial,sans-serif!important}
 .stApp{background:#f7f7f7;color:#202124}.block-container{padding-top:3.6rem;max-width:1500px}
 [data-testid="stHeader"]{background:#087dac}
 [data-testid="stSidebar"]{background:#ffffff!important;border-right:1px solid #e5e7eb}
@@ -1367,6 +1368,116 @@ def addendum_page(user, section):
         m2.metric("Sconto quantità automatico",f"{current_discount:.0f}%")
         m3.metric("Totale EDGE EVO 2.0",euro(total))
 
+def benefits_summary_page(user):
+    st.title("Riepilogo vantaggi e simulazione premi")
+    is_admin=user.get("role")=="admin"
+    if is_admin:
+        labels={f"{info['name']} · {code}":code for code,info in CLIENTS.items()}
+        selected=st.selectbox("Cliente",list(labels.keys()),key="benefits_client")
+        code=labels[selected]
+    else:
+        code=user.get("customer_code") or user.get("code")
+        if not code or code not in CLIENTS:
+            st.error("Cliente non associato all'account.");return
+        st.caption(CLIENTS[code]["name"])
+
+    saved=load_addendum_orders(code)
+    bonus=load_addendum_bonus(code)
+    products=addendum_products()
+    edge=[p for p in products if p[0].startswith("EDGE_F_")]
+    aqua=[p for p in products if p[0].startswith("AQUA_F_")]
+    evo=[p for p in products if p[0].startswith("WISAN_YME_")]
+    rows=[]; total_products=0.0
+
+    def add_promo_rows(group, family, gift_every, fixed_gift_code=None):
+        nonlocal total_products
+        qty_total=sum(int(saved.get(p[0],{}).get("qty",0)) for p in group)
+        qdisc=edge_quantity_discount(qty_total) if family=="EDGE_F" else aqua_quantity_discount(qty_total)
+        extra=float(bonus.get(family,{}).get("extra_discount",0) or 0)
+        temp=[]
+        for code_,label,_,list_price in group:
+            qty=int(saved.get(code_,{}).get("qty",0)); lp=float(list_price)
+            net_before_gift=lp*0.40*(1-extra/100)*(1-qdisc/100)
+            temp.append((code_,label,qty,lp,net_before_gift))
+        gifts=qty_total//gift_every
+        if family=="EDGE_F":
+            gift_unit=6443.0*0.40*(1-extra/100)*(1-qdisc/100)
+        else:
+            active=[x[4] for x in temp if x[2]>0]; gift_unit=min(active) if active else 0.0
+        gift_value=gifts*gift_unit
+        gift_share=gift_value/qty_total if qty_total else 0.0
+        for _,label,qty,lp,net in temp:
+            final=max(net-gift_share,0)
+            if qty>0:
+                rows.append({"Accordo":"Promo EDGE/AQUA","Famiglia":"EDGE F" if family=="EDGE_F" else "AQUA F","Prodotto":label.split("·",1)[-1].strip(),"Quantità":qty,"Listino":euro(lp),"Extra sconto":f"{extra:.2f}%".replace(".",","),"Sconto quantità":f"{qdisc:.0f}%","Beneficio omaggio / pz":euro(gift_share),"Netto effettivo / pz":euro(final),"Totale netto":euro(qty*final)})
+                total_products+=qty*final
+
+    add_promo_rows(edge,"EDGE_F",5,"EDGE_F_4.1")
+    add_promo_rows(aqua,"AQUA_F",11)
+
+    evo_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in evo)
+    evo_qdisc=edge_quantity_discount(evo_qty)
+    evo_manual=max([float(saved.get(p[0],{}).get("list_price",0) or 0) for p in evo] or [0.0])
+    for code_,label,_,base in evo:
+        qty=int(saved.get(code_,{}).get("qty",0)); base=float(base)
+        net=base*(1-evo_manual/100)*(1-evo_qdisc/100)
+        if qty>0:
+            rows.append({"Accordo":"EDGE EVO 2.0","Famiglia":"EDGE EVO 2.0","Prodotto":label.replace("EDGE EVO 2.0 · ",""),"Quantità":qty,"Listino":euro(base),"Extra sconto":f"{evo_manual:.2f}%".replace(".",","),"Sconto quantità":f"{evo_qdisc:.0f}%","Beneficio omaggio / pz":euro(0),"Netto effettivo / pz":euro(net),"Totale netto":euro(qty*net)})
+            total_products+=qty*net
+
+    bilico=load_bilico(code)
+    lines={"EZCOOL":[("27M",234.0),("35M",251.0),("53M",450.0),("70M",549.0)],"CRISTALLO2":[("27M",377.0),("35M",397.0),("53M",632.0),("70M",765.0)]}
+    for family,sizes in lines.items():
+        extra=float(bilico.get((family,"EXTRA_DISCOUNT"),0) or 0)
+        for size,base in sizes:
+            qty=int(bilico.get((family,size),0)); net=base*(1-extra/100)
+            if qty>0:
+                rows.append({"Accordo":"Sconto Bilico","Famiglia":family,"Prodotto":size,"Quantità":qty,"Listino":euro(base),"Extra sconto":f"{extra:.2f}%".replace(".",","),"Sconto quantità":"-","Beneficio omaggio / pz":euro(0),"Netto effettivo / pz":euro(net),"Totale netto":euro(qty*net)})
+                total_products+=qty*net
+
+    native=load_native(code); native_extra=float(native.get("EXTRA_DISCOUNT",0) or 0)
+    for size,base in [("27M",213.0),("35M",237.0),("53M",441.0),("70M",537.0)]:
+        qty=int(native.get(size,0)); net=base*(1-native_extra/100)
+        if qty>0:
+            rows.append({"Accordo":"NATIVE 2","Famiglia":"NATIVE 2","Prodotto":size,"Quantità":qty,"Listino":euro(base),"Extra sconto":f"{native_extra:.2f}%".replace(".",","),"Sconto quantità":"-","Beneficio omaggio / pz":euro(0),"Netto effettivo / pz":euro(net),"Totale netto":euro(qty*net)})
+            total_products+=qty*net
+
+    st.subheader("Quanto paghi i singoli prodotti")
+    if rows: st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    else: st.info("Inserisci le quantità negli Addendum per vedere i netti effettivi.")
+    st.metric("Totale prodotti dopo tutte le promo",euro(total_products))
+
+    st.subheader("Simulazione premi")
+    total_prizes=0.0; prize_rows=[]
+    super_targets=load_superpre_values(code)
+    # Super Pre: programma salvato e target H1 ricavato dal dataset corrente, stessa logica della pagina dedicata.
+    record=load_file(code)
+    if record:
+        parsed=read_export(io.BytesIO(bytes(record["content"]))); data=parsed[0] if isinstance(parsed,tuple) else parsed
+        catalogs=data[data["Livello"]=="catalog"].copy(); families=data[data["Livello"]=="family"].copy()
+        split=catalogs[catalogs["Catalogo"].astype(str).str.strip().str.casefold()=="split"]
+        aqua_f=families[families["Famiglia Prodotto"].astype(str).str.contains("aqua",case=False,na=False)]
+        targets_sp={"SPLIT":float((split["Spedito Q1"]+split["Da Spedire Q1"]+split["Spedito Q2"]+split["Da Spedire Q2"]).sum()),"AQUA_F":float((aqua_f["Spedito Q1"]+aqua_f["Da Spedire Q1"]+aqua_f["Spedito Q2"]+aqua_f["Da Spedire Q2"]).sum())}
+        for fam,label in [("SPLIT","Super Pre SPLIT"),("AQUA_F","Super Pre AQUA F")]:
+            vals=super_targets.get(fam,{"q1":0,"q2":0}); q1=float(vals.get("q1",0)); q2=float(vals.get("q2",0)); target=targets_sp[fam]; reached=target>0 and round(q1+q2)>=round(target)
+            prize=(q1*.10+q2*.05) if reached else 0.0; total_prizes+=prize
+            prize_rows.append({"Premio":label,"Target":euro(target),"Valore simulato":euro(prize),"Stato":"Raggiunto" if reached else "Da raggiungere"})
+        agreement=load_commercial_agreement(code); locked=bool(agreement.get("snapshot_locked",False)); baseline=float(agreement.get("baseline_2026",0) or 0); baseline_q1=float(agreement.get("baseline_q1_2026",0) or 0)
+        hs=catalogs[catalogs["Catalogo"].astype(str).str.strip().str.casefold().isin(["home","split"])]
+        current_q1=float((hs["Spedito Q1"]+hs["Da Spedire Q1"]).sum()); current_year=float(hs["Totale Complessivo"].sum())
+        if locked and baseline>0:
+            rate=0.0
+            for threshold,r in [(0.80,.01),(0.90,.02),(1.00,.04),(1.10,.05),(1.20,.06)]:
+                if current_year/baseline>=threshold: rate=r
+            annual=current_year*rate if current_year>=50000 else 0.0
+            q1pr=current_q1*.03 if baseline_q1>0 and current_q1>=baseline_q1 and current_year>=50000 else 0.0
+            total_prizes+=annual+q1pr
+            prize_rows.append({"Premio":"Accordo commerciale annuale","Target":f"{rate*100:.0f}% maturato","Valore simulato":euro(annual),"Stato":"Maturato" if annual>0 else "Da raggiungere"})
+            prize_rows.append({"Premio":"Accordo commerciale Q1","Target":euro(baseline_q1),"Valore simulato":euro(q1pr),"Stato":"Raggiunto" if q1pr>0 else "Da raggiungere"})
+    if prize_rows: st.dataframe(pd.DataFrame(prize_rows),use_container_width=True,hide_index=True)
+    st.metric("Totale premi simulati",euro(total_prizes))
+    st.caption("Simulazione informativa basata sui dati e sulle condizioni salvate nelle sezioni Addendum. I premi definitivi restano soggetti alle condizioni dell'accordo commerciale.")
+
 def targets_page():
     st.title("Target annuali")
     st.caption("I valori vengono salvati su Neon e restano invariati finché non vengono modificati dall'amministratore.")
@@ -1443,13 +1554,14 @@ with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
     if st.button("Esci"): st.session_state.user=None;st.rerun()
-    pages=["Dashboard","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
+    pages=["Dashboard","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
 if page=="Gestione PDF conferme": order_pdfs_page();st.stop()
+if page=="Riepilogo vantaggi": benefits_summary_page(user);st.stop()
 if page=="Accordi Addendum · Promo EDGE e AQUA": addendum_page(user,"promo");st.stop()
 if page=="Accordi Addendum · EDGE EVO 2.0": addendum_page(user,"evo");st.stop()
 if page=="Accordi Addendum · Super Pre Split e Aqua F": superpre_page(user);st.stop()
