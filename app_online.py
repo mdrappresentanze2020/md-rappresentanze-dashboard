@@ -1125,35 +1125,35 @@ def addendum_page(user, section):
 
     def family_summary(title, family_products, threshold, bonus_key):
         rows=[]; order_total=0.0; total_qty=0
-        bonus=bonus_saved.get(bonus_key,{})
-        gift_net=float(bonus.get("net",0))
-        if bonus_key=="EDGE_F":
-            total_edge_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in family_products)
-            extra_discount_41=edge_quantity_discount(total_edge_qty)
-            gift_net=6443.0*0.40*(1-extra_discount_41/100)
-        for code,label,note,default_net in family_products:
-            item=saved.get(code,{})
-            qty=int(item.get("qty",0))
-            if bonus_key=="EDGE_F":
-                list_price=float(default_net)
-                quantity_discount=edge_quantity_discount(sum(int(saved.get(p[0],{}).get("qty",0)) for p in family_products))
-                net=list_price*0.40*(1-quantity_discount/100)
-            else:
-                list_price=float(default_net)
-                quantity_discount=aqua_quantity_discount(sum(int(saved.get(p[0],{}).get("qty",0)) for p in family_products))
-                net=list_price*0.40*(1-quantity_discount/100)
+        total_family_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in family_products)
+        quantity_discount=edge_quantity_discount(total_family_qty) if bonus_key=="EDGE_F" else aqua_quantity_discount(total_family_qty)
+        gift_net=0.0
+        for code,label,note,list_price in family_products:
+            qty=int(saved.get(code,{}).get("qty",0))
+            list_price=float(list_price)
+            net=list_price*0.40*(1-quantity_discount/100)
             total_qty+=qty; order_total+=qty*net
-            rows.append((code,label,qty,net))
+            rows.append((code,label,qty,list_price,net))
         gifts=total_qty//threshold
-        if bonus_key=="AQUA_F":
-            ordered_nets=[net for _,_,qty,net in rows if qty>0]
+        if bonus_key=="EDGE_F":
+            gift_net=6443.0*0.40*(1-quantity_discount/100)
+        else:
+            ordered_nets=[net for _,_,qty,_,net in rows if qty>0]
             gift_net=min(ordered_nets) if ordered_nets else 0.0
         gift_value=gifts*gift_net
         quota=(gift_value/total_qty) if total_qty else 0.0
         display=[]
-        for code,label,qty,net in rows:
+        for code,label,qty,list_price,net in rows:
             effective=max(net-quota,0)
-            display.append({"Modello":label.split("·",1)[-1].strip(),"Quantità":qty,"Prezzo netto":euro(effective),"Totale":euro(qty*effective)})
+            display.append({
+                "Modello":label.split("·",1)[-1].strip(),
+                "Quantità":qty,
+                "Prezzo di listino":euro(list_price),
+                "Sconto base":"60%",
+                "Sconto quantità":f"{quantity_discount:.0f}%",
+                "Prezzo netto":euro(effective),
+                "Totale":euro(qty*effective)
+            })
         discounted=max(order_total-gift_value,0)
         st.subheader(title)
         m1,m2,m3,m4=st.columns(4)
