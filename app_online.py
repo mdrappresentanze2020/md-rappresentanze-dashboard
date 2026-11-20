@@ -28,7 +28,14 @@ button[kind="primary"] *,button[kind="secondary"] *,div[data-testid="stFormSubmi
 .titleband{background:#dff27d;text-align:center;font-size:28px;font-weight:900;font-style:italic;padding:5px;margin:8px 0 16px}
 .months{display:grid;grid-template-columns:repeat(12,1fr);gap:2px}
 .month{background:#3d3d3f;color:#fff;text-align:center;padding:7px 2px;font-size:12px}
-.stMetric{background:#fff!important;border:1px solid #d7dde5;border-radius:14px;padding:14px}
+.stMetric{background:linear-gradient(135deg,#ffffff 0%,#f4fbff 100%)!important;border:1px solid #b9dff2;border-left:5px solid #087dac;border-radius:12px;padding:14px;box-shadow:0 2px 8px rgba(8,125,172,.08)}
+/* Palette piu vivace, ispirata al layout arancio/azzurro senza cambiare struttura */
+[data-testid="stMain"] h1{background:linear-gradient(90deg,#ffc96b,#ffd98f)!important;border-bottom:2px solid #f28c45;border-radius:5px;padding:7px 14px!important;font-style:italic}
+[data-testid="stMain"] h2{color:#087dac!important;border-left:5px solid #f28c45;padding-left:10px!important}
+[data-testid="stMain"] h3{color:#3f4854!important;background:#fff1d2!important;border:1px solid #f2b66d;border-radius:6px;padding:6px 10px!important}
+[data-testid="stDataFrame"]{border:1px solid #f28c45!important;border-radius:8px!important;overflow:hidden!important}
+[data-testid="stSelectbox"],[data-testid="stNumberInput"],[data-testid="stTextInput"]{border-radius:7px}
+div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14px;background:#fffdfa}
 [data-testid="stMetricLabel"] p{color:#3f4854!important;font-weight:700}
 [data-testid="stMetricValue"]{color:#4F8FC5!important}
 /* Testi dashboard sempre visibili su sfondo chiaro */
