@@ -1458,6 +1458,13 @@ def benefits_summary_page(user):
         return ((q1*0.10+q2*0.05)/total) if total>0 else 0.0
     split_super_rate=super_rate("SPLIT")
     aqua_super_rate=super_rate("AQUA_F")
+    # Per la simulazione prodotto mostriamo separatamente prima il Super Pre Q1 10% e Q2 5%.
+    split_vals=super_program.get("SPLIT",{"q1":0,"q2":0})
+    aqua_vals=super_program.get("AQUA_F",{"q1":0,"q2":0})
+    split_q1_active=float(split_vals.get("q1",0) or 0)>0
+    split_q2_active=float(split_vals.get("q2",0) or 0)>0
+    aqua_q1_active=float(aqua_vals.get("q1",0) or 0)>0
+    aqua_q2_active=float(aqua_vals.get("q2",0) or 0)>0
 
     st.subheader("Quanto paghi ogni prodotto dopo tutti i premi")
     summary_df=pd.DataFrame(rows) if rows else pd.DataFrame()
@@ -1477,9 +1484,13 @@ def benefits_summary_page(user):
         if section_df.empty:
             continue
         if award_group=="SPLIT":
-            rates=[("Super Pre SPLIT",split_super_rate),(f"Premio annuale {annual_scenario}",annual_rate),("Premio Q1",q1_rate)]
+            super_q1=0.10 if split_q1_active else 0.0
+            super_q2=0.05 if split_q2_active else 0.0
+            rates=[("Super Pre Q1",super_q1),("Super Pre Q2",super_q2),(f"Premio annuale {annual_scenario}",annual_rate),("Premio Q1 accordo commerciale",q1_rate)]
         else:
-            rates=[("Super Pre AQUA F",aqua_super_rate)]
+            super_q1=0.10 if aqua_q1_active else 0.0
+            super_q2=0.05 if aqua_q2_active else 0.0
+            rates=[("Super Pre Q1",super_q1),("Super Pre Q2",super_q2)]
         total_rate=min(sum(x[1] for x in rates),1.0)
         rate_text=" + ".join(f"{name} {rate*100:.2f}%".replace(".",",") for name,rate in rates if rate>0) or "Nessun premio programmato"
 
@@ -1489,6 +1500,8 @@ def benefits_summary_page(user):
             except: return 0.0
         section_df["_netto_pre"] = section_df["Netto effettivo / pz"].map(parse_euro)
         section_df["_qty"] = pd.to_numeric(section_df["Quantità"],errors="coerce").fillna(0)
+        section_df["Super Pre Q1 10%"] = section_df["_netto_pre"].map(lambda v:euro(v*super_q1))
+        section_df["Super Pre Q2 5%"] = section_df["_netto_pre"].map(lambda v:euro(v*super_q2))
         section_df["Premio complessivo"] = f"{total_rate*100:.2f}%".replace(".",",")
         section_df["Premio per pezzo"] = section_df["_netto_pre"].map(lambda v:euro(v*total_rate))
         section_df["Netto finale dopo premi"] = section_df["_netto_pre"].map(lambda v:euro(max(v*(1-total_rate),0)))
@@ -1507,7 +1520,7 @@ def benefits_summary_page(user):
         m3.metric("Totale dopo i premi",euro(family_after))
         m4.metric("Quantità famiglia",int(section_df["_qty"].sum()))
         st.caption(rate_text)
-        compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Premio complessivo","Premio per pezzo","Netto finale dopo premi","Totale dopo premi"]]
+        compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Super Pre Q1 10%","Super Pre Q2 5%","Premio complessivo","Premio per pezzo","Netto finale dopo premi","Totale dopo premi"]]
         st.dataframe(compact,use_container_width=True,hide_index=True)
 
     st.subheader("Riepilogo complessivo")
