@@ -1483,16 +1483,14 @@ def benefits_summary_page(user):
         section_df=summary_df[summary_df["Famiglia"]==family_key].copy() if not summary_df.empty else pd.DataFrame()
         if section_df.empty:
             continue
-        if award_group=="SPLIT":
-            super_q1=0.10 if split_q1_active else 0.0
-            super_q2=0.05 if split_q2_active else 0.0
-            rates=[("Super Pre Q1",super_q1),("Super Pre Q2",super_q2),(f"Premio annuale {annual_scenario}",annual_rate),("Premio Q1 accordo commerciale",q1_rate)]
-        else:
-            super_q1=0.10 if aqua_q1_active else 0.0
-            super_q2=0.05 if aqua_q2_active else 0.0
-            rates=[("Super Pre Q1",super_q1),("Super Pre Q2",super_q2)]
-        total_rate=min(sum(x[1] for x in rates),1.0)
-        rate_text=" + ".join(f"{name} {rate*100:.2f}%".replace(".",",") for name,rate in rates if rate>0) or "Nessun premio programmato"
+        # Due scenari alternativi, non cumulativi tra Q1 e Q2:
+        # Q1 = Super Pre 10% + premio Q1 3% + premio annuale selezionato.
+        # Q2 = Super Pre 5% + premio annuale selezionato.
+        q1_scenario_rate=min(0.10+q1_rate+annual_rate,1.0)
+        q2_scenario_rate=min(0.05+annual_rate,1.0)
+        super_q1=0.10
+        super_q2=0.05
+        rate_text=f"Scenario Q1: Super Pre 10% + Q1 {q1_rate*100:.0f}% + fine anno {annual_rate*100:.0f}% = {q1_scenario_rate*100:.0f}% · Scenario Q2: Super Pre 5% + fine anno {annual_rate*100:.0f}% = {q2_scenario_rate*100:.0f}%"
 
         def parse_euro(value):
             text_value=str(value).replace("€","").replace(".","").replace(",",".").strip()
@@ -1500,33 +1498,37 @@ def benefits_summary_page(user):
             except: return 0.0
         section_df["_netto_pre"] = section_df["Netto effettivo / pz"].map(parse_euro)
         section_df["_qty"] = pd.to_numeric(section_df["Quantità"],errors="coerce").fillna(0)
-        section_df["Super Pre Q1 10%"] = section_df["_netto_pre"].map(lambda v:euro(v*super_q1))
-        section_df["Super Pre Q2 5%"] = section_df["_netto_pre"].map(lambda v:euro(v*super_q2))
-        section_df["Premio complessivo"] = f"{total_rate*100:.2f}%".replace(".",",")
-        section_df["Premio per pezzo"] = section_df["_netto_pre"].map(lambda v:euro(v*total_rate))
-        section_df["Netto finale dopo premi"] = section_df["_netto_pre"].map(lambda v:euro(max(v*(1-total_rate),0)))
-        section_df["Totale dopo premi"] = section_df.apply(lambda r:euro(max(r["_netto_pre"]*(1-total_rate),0)*r["_qty"]),axis=1)
+        section_df["Super Pre Q1 10%"] = section_df["_netto_pre"].map(lambda v:euro(v*0.10))
+        section_df["Premio Q1 3%"] = section_df["_netto_pre"].map(lambda v:euro(v*q1_rate))
+        section_df["Premio fine anno"] = section_df["_netto_pre"].map(lambda v:euro(v*annual_rate))
+        section_df["Netto finale se Q1"] = section_df["_netto_pre"].map(lambda v:euro(max(v*(1-q1_scenario_rate),0)))
+        section_df["Super Pre Q2 5%"] = section_df["_netto_pre"].map(lambda v:euro(v*0.05))
+        section_df["Netto finale se Q2"] = section_df["_netto_pre"].map(lambda v:euro(max(v*(1-q2_scenario_rate),0)))
+        section_df["Totale se Q1"] = section_df.apply(lambda r:euro(max(r["_netto_pre"]*(1-q1_scenario_rate),0)*r["_qty"]),axis=1)
+        section_df["Totale se Q2"] = section_df.apply(lambda r:euro(max(r["_netto_pre"]*(1-q2_scenario_rate),0)*r["_qty"]),axis=1)
         family_before=float((section_df["_netto_pre"]*section_df["_qty"]).sum())
-        family_prize=family_before*total_rate
-        family_after=family_before-family_prize
-        total_family_prizes+=family_prize
-        total_products_after_prizes+=family_after
+        family_prize_q1=family_before*q1_scenario_rate; family_after_q1=family_before-family_prize_q1
+        family_prize_q2=family_before*q2_scenario_rate; family_after_q2=family_before-family_prize_q2
+        total_family_prizes+=family_prize_q1
+        total_products_after_prizes+=family_after_q1
         if section_df["_qty"].sum()>0: ordered_families+=1
 
         st.markdown(f"### {section_title}")
         m1,m2,m3,m4=st.columns(4)
-        m1.metric("Premio famiglia simulato",euro(family_prize),delta=f"{total_rate*100:.2f}%".replace(".",","))
-        m2.metric("Totale prima dei premi",euro(family_before))
-        m3.metric("Totale dopo i premi",euro(family_after))
-        m4.metric("Quantità famiglia",int(section_df["_qty"].sum()))
+        m1.metric("Premio famiglia se Q1",euro(family_prize_q1),delta=f"{q1_scenario_rate*100:.0f}%")
+        m2.metric("Totale netto se Q1",euro(family_after_q1))
+        m3.metric("Premio famiglia se Q2",euro(family_prize_q2),delta=f"{q2_scenario_rate*100:.0f}%")
+        m4.metric("Totale netto se Q2",euro(family_after_q2))
         st.caption(rate_text)
-        compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Super Pre Q1 10%","Super Pre Q2 5%","Premio complessivo","Premio per pezzo","Netto finale dopo premi","Totale dopo premi"]]
+        if family_key=="AQUA F":
+            st.caption("AQUA F è trattata come HOME: Super Pre 10% se fatturata nel Q1 oppure 5% se fatturata nel Q2, più premio Q1 HOME 3% e premio annuale HOME (100% = 4% nello scenario predefinito).")
+        compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Super Pre Q1 10%","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Super Pre Q2 5%","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
         st.dataframe(compact,use_container_width=True,hide_index=True)
 
     st.subheader("Riepilogo complessivo")
     r1,r2,r3=st.columns(3)
-    r1.metric("Premi complessivi sui prodotti",euro(total_family_prizes))
-    r2.metric("Totale prodotti dopo tutti i premi",euro(total_products_after_prizes))
+    r1.metric("Premi complessivi scenario Q1",euro(total_family_prizes))
+    r2.metric("Totale prodotti scenario Q1",euro(total_products_after_prizes))
     r3.metric("Famiglie con ordini",ordered_families)
 
     st.subheader("Dettaglio premi e target")
