@@ -21,6 +21,9 @@ st.markdown("""<style>
 [data-testid="stSidebar"] button{background:#2f2f2f!important;border:1px solid #2f2f2f!important}
 [data-testid="stSidebar"] button p,[data-testid="stSidebar"] button span,[data-testid="stSidebar"] button div{color:#ffffff!important;font-weight:700!important}
 [data-testid="stSidebar"] button:hover{background:#087dac!important;border-color:#087dac!important}
+/* Testo sempre bianco in tutti i pulsanti/riquadri a sfondo scuro */
+button[kind="primary"],button[kind="secondary"],div[data-testid="stFormSubmitButton"] button,.stButton button{color:#ffffff!important}
+button[kind="primary"] *,button[kind="secondary"] *,div[data-testid="stFormSubmitButton"] button *,.stButton button *{color:#ffffff!important}
 .brandline{background:#087dac;color:#fff;padding:12px 18px;border-radius:4px}
 .titleband{background:#dff27d;text-align:center;font-size:28px;font-weight:900;font-style:italic;padding:5px;margin:8px 0 16px}
 .months{display:grid;grid-template-columns:repeat(12,1fr);gap:2px}
