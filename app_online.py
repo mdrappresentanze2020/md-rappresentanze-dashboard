@@ -58,6 +58,10 @@ CLIENTS = {
     "M7011384": {"name": "ADDESSI COMMERCIALE SRL", "username": "addessi"},
     "M7010315": {"name": "Centro Edile De Gregoris S.r.l.", "username": "degregoris"},
 }
+EXTRA_DISCOUNT_CLIENTS = {"M7003635", "M7009353"}
+
+def extra_discount_allowed(customer_code):
+    return customer_code in EXTRA_DISCOUNT_CLIENTS
 
 def password_hash(password): return hashlib.sha256(password.encode("utf-8")).hexdigest()
 def configured_users(): return {name: dict(values) for name, values in st.secrets.get("users", {}).items()}
@@ -831,11 +835,13 @@ def native_page(user):
                 st.markdown(f"**NATIVE 2 · {size}**")
                 st.caption(f"Prezzo netto {euro(net)}")
                 quantities[size]=st.number_input("Quantità",min_value=0,step=1,value=int(saved.get(size,0)),key=f"native_qty_{code}_{size}")
-        if is_admin:
+        if is_admin and extra_discount_allowed(code):
             extra_discount=st.number_input("NATIVE 2 · Extra sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(saved.get("EXTRA_DISCOUNT",0)),format="%.2f",key=f"native_discount_{code}")
-        else:
+        elif extra_discount_allowed(code):
             extra_discount=float(saved.get("EXTRA_DISCOUNT",0))
             st.metric("NATIVE 2 · Extra sconto",f"{extra_discount:.2f}%".replace(".",","))
+        else:
+            extra_discount=0.0
         save=st.form_submit_button("Salva quantità NATIVE 2",type="primary",use_container_width=True)
     if save:
         save_native(code,quantities,extra_discount);st.success("Quantità NATIVE 2 aggiornate.");st.rerun()
@@ -916,11 +922,13 @@ def bilico_page(user):
                     st.markdown(f"**{size}**")
                     st.caption(f"Netto Bilico {euro(net)}")
                     quantities[(line,size)]=st.number_input("Quantità",min_value=0,step=1,value=int(saved.get((line,size),0)),key=f"bilico_{code}_{line}_{size}")
-            if is_admin:
+            if is_admin and extra_discount_allowed(code):
                 discounts[line]=st.number_input(f"{info['title']} · Extra sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(saved.get((line,"EXTRA_DISCOUNT"),0)),format="%.2f",key=f"bilico_discount_{code}_{line}")
-            else:
+            elif extra_discount_allowed(code):
                 discounts[line]=float(saved.get((line,"EXTRA_DISCOUNT"),0))
                 st.metric(f"{info['title']} · Extra sconto",f"{discounts[line]:.2f}%".replace(".",","))
+            else:
+                discounts[line]=0.0
         save=st.form_submit_button("Salva quantità Bilico",type="primary",use_container_width=True)
     if save:
         if is_admin:
@@ -1158,7 +1166,7 @@ def addendum_page(user, section):
         rows=[]; order_total=0.0; total_qty=0
         total_family_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in family_products)
         quantity_discount=edge_quantity_discount(total_family_qty) if bonus_key=="EDGE_F" else aqua_quantity_discount(total_family_qty)
-        extra_discount=float(bonus_saved.get(bonus_key,{}).get("extra_discount",0) or 0)
+        extra_discount=float(bonus_saved.get(bonus_key,{}).get("extra_discount",0) or 0) if extra_discount_allowed(selected_code) else 0.0
         gift_net=0.0
         for code,label,note,list_price in family_products:
             qty=int(saved.get(code,{}).get("qty",0))
@@ -1208,10 +1216,13 @@ def addendum_page(user, section):
             saved_aqua_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in aqua_products)
             automatic_aqua_discount=aqua_quantity_discount(saved_aqua_qty)
             with st.form(f"promo_admin_{selected_code}"):
-                st.subheader("Extra sconti")
-                ex1,ex2=st.columns(2)
-                edge_extra=ex1.number_input("EDGE F · Extra sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(bonus_saved.get("EDGE_F",{}).get("extra_discount",0) or 0),format="%.2f")
-                aqua_extra=ex2.number_input("AQUA F · Extra sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(bonus_saved.get("AQUA_F",{}).get("extra_discount",0) or 0),format="%.2f")
+                if extra_discount_allowed(selected_code):
+                    st.subheader("Extra sconti")
+                    ex1,ex2=st.columns(2)
+                    edge_extra=ex1.number_input("EDGE F · Extra sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(bonus_saved.get("EDGE_F",{}).get("extra_discount",0) or 0),format="%.2f")
+                    aqua_extra=ex2.number_input("AQUA F · Extra sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(bonus_saved.get("AQUA_F",{}).get("extra_discount",0) or 0),format="%.2f")
+                else:
+                    edge_extra=0.0; aqua_extra=0.0
                 for family_name,family_products in [("EDGE F",edge_products),("AQUA F",aqua_products)]:
                     st.subheader(family_name)
                     for code,label,note,default_net in family_products:
@@ -1267,12 +1278,13 @@ def addendum_page(user, section):
             client_aqua_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in aqua_products)
             client_edge_discount=edge_quantity_discount(client_edge_qty)
             client_aqua_discount=aqua_quantity_discount(client_aqua_qty)
-            edge_extra=float(bonus_saved.get("EDGE_F",{}).get("extra_discount",0) or 0)
-            aqua_extra=float(bonus_saved.get("AQUA_F",{}).get("extra_discount",0) or 0)
+            edge_extra=float(bonus_saved.get("EDGE_F",{}).get("extra_discount",0) or 0) if extra_discount_allowed(selected_code) else 0.0
+            aqua_extra=float(bonus_saved.get("AQUA_F",{}).get("extra_discount",0) or 0) if extra_discount_allowed(selected_code) else 0.0
             with st.form(f"promo_client_{selected_code}"):
-                ex1,ex2=st.columns(2)
-                ex1.metric("EDGE F · Extra sconto",f"{edge_extra:.2f}%".replace(".",","))
-                ex2.metric("AQUA F · Extra sconto",f"{aqua_extra:.2f}%".replace(".",","))
+                if extra_discount_allowed(selected_code):
+                    ex1,ex2=st.columns(2)
+                    ex1.metric("EDGE F · Extra sconto",f"{edge_extra:.2f}%".replace(".",","))
+                    ex2.metric("AQUA F · Extra sconto",f"{aqua_extra:.2f}%".replace(".",","))
                 for family_name,family_products,auto_discount in [
                     ("EDGE F",edge_products,client_edge_discount),
                     ("AQUA F",aqua_products,client_aqua_discount)
@@ -1304,7 +1316,10 @@ def addendum_page(user, section):
             saved_base_discounts=[float(saved.get(p[0],{}).get("list_price",0) or 0) for p in evo_products]
             saved_base_discount=max(saved_base_discounts or [0.0])
             with st.form(f"evo_admin_{selected_code}"):
-                base_discount=st.number_input("Sconto EDGE EVO 2.0 (%)",min_value=0.0,max_value=100.0,step=0.5,value=saved_base_discount,format="%.2f",key=f"evo_common_discount_{selected_code}")
+                if extra_discount_allowed(selected_code):
+                    base_discount=st.number_input("Sconto EDGE EVO 2.0 (%)",min_value=0.0,max_value=100.0,step=0.5,value=saved_base_discount,format="%.2f",key=f"evo_common_discount_{selected_code}")
+                else:
+                    base_discount=0.0
                 for code,label,note,default_net in evo_products:
                     current=saved.get(code,{})
                     c1,c2,c3,c4,c5=st.columns(5)
@@ -1325,9 +1340,10 @@ def addendum_page(user, section):
         else:
             quantities={}
             saved_base_discounts=[float(saved.get(p[0],{}).get("list_price",0) or 0) for p in evo_products]
-            base_discount=max(saved_base_discounts or [0.0])
+            base_discount=max(saved_base_discounts or [0.0]) if extra_discount_allowed(selected_code) else 0.0
             with st.form(f"evo_client_{selected_code}"):
-                st.metric("Sconto EDGE EVO 2.0",f"{base_discount:.2f}%".replace(".",","))
+                if extra_discount_allowed(selected_code):
+                    st.metric("Sconto EDGE EVO 2.0",f"{base_discount:.2f}%".replace(".",","))
                 for code,label,note,default_net in evo_products:
                     current=saved.get(code,{})
                     c1,c2,c3,c4,c5=st.columns(5)
@@ -1355,7 +1371,7 @@ def addendum_page(user, section):
         current_discount=edge_quantity_discount(current_qty)
         rows=[]; subtotal=0.0; total=0.0
         summary_base_discounts=[float(saved.get(p[0],{}).get("list_price",0) or 0) for p in evo_products]
-        summary_base_discount=max(summary_base_discounts or [0.0])
+        summary_base_discount=max(summary_base_discounts or [0.0]) if extra_discount_allowed(selected_code) else 0.0
         for code,label,note,default_net in evo_products:
             item=saved.get(code,{})
             qty=int(item.get("qty",0)); base=float(default_net); base_discount=summary_base_discount
@@ -1393,7 +1409,7 @@ def benefits_summary_page(user):
         nonlocal total_products
         qty_total=sum(int(saved.get(p[0],{}).get("qty",0)) for p in group)
         qdisc=edge_quantity_discount(qty_total) if family=="EDGE_F" else aqua_quantity_discount(qty_total)
-        extra=float(bonus.get(family,{}).get("extra_discount",0) or 0)
+        extra=float(bonus.get(family,{}).get("extra_discount",0) or 0) if extra_discount_allowed(code) else 0.0
         temp=[]
         for code_,label,_,list_price in group:
             qty=int(saved.get(code_,{}).get("qty",0)); lp=float(list_price)
@@ -1428,14 +1444,14 @@ def benefits_summary_page(user):
     bilico=load_bilico(code)
     lines={"EZCOOL":[("27M",234.0),("35M",251.0),("53M",450.0),("70M",549.0)],"CRISTALLO2":[("27M",377.0),("35M",397.0),("53M",632.0),("70M",765.0)]}
     for family,sizes in lines.items():
-        extra=float(bilico.get((family,"EXTRA_DISCOUNT"),0) or 0)
+        extra=float(bilico.get((family,"EXTRA_DISCOUNT"),0) or 0) if extra_discount_allowed(code) else 0.0
         for size,base in sizes:
             qty=int(bilico.get((family,size),0)); net=base*(1-extra/100)
             if qty>=0:
                 rows.append({"Accordo":"Sconto Bilico","Famiglia":family,"Prodotto":size,"Quantità":qty,"Listino":euro(base),"Extra sconto":f"{extra:.2f}%".replace(".",","),"Sconto quantità":"-","Beneficio omaggio / pz":euro(0),"Netto effettivo / pz":euro(net),"Totale netto":euro(qty*net)})
                 total_products+=qty*net
 
-    native=load_native(code); native_extra=float(native.get("EXTRA_DISCOUNT",0) or 0)
+    native=load_native(code); native_extra=float(native.get("EXTRA_DISCOUNT",0) or 0) if extra_discount_allowed(code) else 0.0
     for size,base in [("27M",213.0),("35M",237.0),("53M",441.0),("70M",537.0)]:
         qty=int(native.get(size,0)); net=base*(1-native_extra/100)
         if qty>=0:
@@ -1557,10 +1573,19 @@ def benefits_summary_page(user):
             st.caption("EDGE F ed EDGE EVO 2.0 non beneficiano del Super Pre. Scenario Q1: premio Q1 3% + premio fine anno selezionato. Scenario Q2: solo premio fine anno selezionato.")
         if family_key=="AQUA F":
             st.caption("AQUA F è trattata come HOME: Super Pre 10% se fatturata nel Q1 oppure 5% se fatturata nel Q2, più premio Q1 HOME 3% e premio annuale HOME (100% = 4% nello scenario predefinito).")
-        if family_key in ("EDGE F","EDGE EVO 2.0"):
+        show_extra=extra_discount_allowed(code)
+        if family_key=="EDGE F":
             compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
+        elif family_key=="EDGE EVO 2.0":
+            # EDGE EVO / R32 non prevede omaggi: la colonna beneficio omaggio non viene mostrata.
+            compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Netto effettivo / pz","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
+        elif family_key in ("EZCOOL","CRISTALLO2","NATIVE 2"):
+            # Su questi SPLIT non è prevista una promozione omaggio: eliminiamo la colonna dal riepilogo.
+            compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Netto effettivo / pz","Super Pre Q1 10%","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Super Pre Q2 5%","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
         else:
             compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Super Pre Q1 10%","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Super Pre Q2 5%","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
+        if not show_extra and "Extra sconto" in compact.columns:
+            compact=compact.drop(columns=["Extra sconto"])
         st.dataframe(compact,use_container_width=True,hide_index=True)
 
     st.subheader("Riepilogo complessivo")
