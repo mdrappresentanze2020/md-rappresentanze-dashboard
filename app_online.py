@@ -1262,14 +1262,17 @@ def addendum_page(user, section):
         auto_discount=edge_quantity_discount(saved_qty)
         if is_admin:
             values={}
+            saved_base_discounts=[float(saved.get(p[0],{}).get("list_price",0) or 0) for p in evo_products]
+            saved_base_discount=max(saved_base_discounts or [0.0])
             with st.form(f"evo_admin_{selected_code}"):
+                base_discount=st.number_input("Sconto EDGE EVO 2.0 (%)",min_value=0.0,max_value=100.0,step=0.5,value=saved_base_discount,format="%.2f",key=f"evo_common_discount_{selected_code}")
                 for code,label,note,default_net in evo_products:
                     current=saved.get(code,{})
                     c1,c2,c3,c4,c5=st.columns(5)
                     qty=c1.number_input(f"{label} · quantità",min_value=0,step=1,value=int(current.get("qty",0)),key=f"eq_{selected_code}_{code}")
                     base_net=float(default_net)
                     c2.metric("Netto Addendum",euro(base_net))
-                    base_discount=c3.number_input(f"{label} · sconto (%)",min_value=0.0,max_value=100.0,step=0.5,value=float(current.get("list_price",0) or 0),format="%.2f",key=f"evo_base_disc_{selected_code}_{code}")
+                    c3.metric("Sconto",f"{base_discount:.2f}%".replace(".",","))
                     c4.metric("Sconto quantità",f"{auto_discount:.0f}%")
                     discounted_net=base_net*(1-base_discount/100)*(1-auto_discount/100)
                     c5.metric("Totale",euro(qty*discounted_net))
@@ -1282,13 +1285,15 @@ def addendum_page(user, section):
                 save_addendum_orders(selected_code,values);st.success("Addendum EDGE EVO 2.0 salvato.");st.rerun()
         else:
             quantities={}
+            saved_base_discounts=[float(saved.get(p[0],{}).get("list_price",0) or 0) for p in evo_products]
+            base_discount=max(saved_base_discounts or [0.0])
             with st.form(f"evo_client_{selected_code}"):
+                st.metric("Sconto EDGE EVO 2.0",f"{base_discount:.2f}%".replace(".",","))
                 for code,label,note,default_net in evo_products:
                     current=saved.get(code,{})
                     c1,c2,c3,c4,c5=st.columns(5)
                     quantities[code]=c1.number_input(f"{label} · quantità",min_value=0,step=1,value=int(current.get("qty",0)),key=f"cq_evo_{selected_code}_{code}")
                     base_net=float(default_net)
-                    base_discount=float(current.get("list_price",0) or 0)
                     c2.metric("Netto Addendum",euro(base_net))
                     c3.metric("Sconto",f"{base_discount:.2f}%".replace(".",","))
                     c4.metric("Sconto quantità",f"{auto_discount:.0f}%")
@@ -1303,16 +1308,18 @@ def addendum_page(user, section):
                 final_discount=edge_quantity_discount(final_qty)
                 values={}
                 for code,label,note,default_net in evo_products:
-                    values[code]={"qty":int(quantities.get(code,0)),"list_price":float(refreshed.get(code,{}).get("list_price",0) or 0),"promo_price":float(default_net),"gift_value":0.0,"quantity_discount":final_discount}
+                    values[code]={"qty":int(quantities.get(code,0)),"list_price":base_discount,"promo_price":float(default_net),"gift_value":0.0,"quantity_discount":final_discount}
                 save_addendum_orders(selected_code,values)
                 st.success("Quantità aggiornate.");st.rerun()
 
         current_qty=sum(int(saved.get(p[0],{}).get("qty",0)) for p in evo_products)
         current_discount=edge_quantity_discount(current_qty)
         rows=[]; subtotal=0.0; total=0.0
+        summary_base_discounts=[float(saved.get(p[0],{}).get("list_price",0) or 0) for p in evo_products]
+        summary_base_discount=max(summary_base_discounts or [0.0])
         for code,label,note,default_net in evo_products:
             item=saved.get(code,{})
-            qty=int(item.get("qty",0)); base=float(default_net); base_discount=float(item.get("list_price",0) or 0)
+            qty=int(item.get("qty",0)); base=float(default_net); base_discount=summary_base_discount
             net=base*(1-base_discount/100)*(1-current_discount/100)
             subtotal+=qty*base; total+=qty*net
             rows.append({"Modello":label.replace("EDGE EVO 2.0 · ",""),"Quantità":qty,"Netto Addendum":euro(base),"Sconto":f"{base_discount:.2f}%".replace(".",","),"Sconto quantità":f"{current_discount:.0f}%","Prezzo netto":euro(net),"Totale":euro(qty*net)})
