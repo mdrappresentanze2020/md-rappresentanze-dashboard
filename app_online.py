@@ -1408,7 +1408,7 @@ def benefits_summary_page(user):
         gift_share=gift_value/qty_total if qty_total else 0.0
         for _,label,qty,lp,net in temp:
             final=max(net-gift_share,0)
-            if qty>0:
+            if qty>=0:
                 rows.append({"Accordo":"Promo EDGE/AQUA","Famiglia":"EDGE F" if family=="EDGE_F" else "AQUA F","Prodotto":label.split("·",1)[-1].strip(),"Quantità":qty,"Listino":euro(lp),"Extra sconto":f"{extra:.2f}%".replace(".",","),"Sconto quantità":f"{qdisc:.0f}%","Beneficio omaggio / pz":euro(gift_share),"Netto effettivo / pz":euro(final),"Totale netto":euro(qty*final)})
                 total_products+=qty*final
 
@@ -1421,7 +1421,7 @@ def benefits_summary_page(user):
     for code_,label,_,base in evo:
         qty=int(saved.get(code_,{}).get("qty",0)); base=float(base)
         net=base*(1-evo_manual/100)*(1-evo_qdisc/100)
-        if qty>0:
+        if qty>=0:
             rows.append({"Accordo":"EDGE EVO 2.0","Famiglia":"EDGE EVO 2.0","Prodotto":label.replace("EDGE EVO 2.0 · ",""),"Quantità":qty,"Listino":euro(base),"Extra sconto":f"{evo_manual:.2f}%".replace(".",","),"Sconto quantità":f"{evo_qdisc:.0f}%","Beneficio omaggio / pz":euro(0),"Netto effettivo / pz":euro(net),"Totale netto":euro(qty*net)})
             total_products+=qty*net
 
@@ -1431,43 +1431,93 @@ def benefits_summary_page(user):
         extra=float(bilico.get((family,"EXTRA_DISCOUNT"),0) or 0)
         for size,base in sizes:
             qty=int(bilico.get((family,size),0)); net=base*(1-extra/100)
-            if qty>0:
+            if qty>=0:
                 rows.append({"Accordo":"Sconto Bilico","Famiglia":family,"Prodotto":size,"Quantità":qty,"Listino":euro(base),"Extra sconto":f"{extra:.2f}%".replace(".",","),"Sconto quantità":"-","Beneficio omaggio / pz":euro(0),"Netto effettivo / pz":euro(net),"Totale netto":euro(qty*net)})
                 total_products+=qty*net
 
     native=load_native(code); native_extra=float(native.get("EXTRA_DISCOUNT",0) or 0)
     for size,base in [("27M",213.0),("35M",237.0),("53M",441.0),("70M",537.0)]:
         qty=int(native.get(size,0)); net=base*(1-native_extra/100)
-        if qty>0:
+        if qty>=0:
             rows.append({"Accordo":"NATIVE 2","Famiglia":"NATIVE 2","Prodotto":size,"Quantità":qty,"Listino":euro(base),"Extra sconto":f"{native_extra:.2f}%".replace(".",","),"Sconto quantità":"-","Beneficio omaggio / pz":euro(0),"Netto effettivo / pz":euro(net),"Totale netto":euro(qty*net)})
             total_products+=qty*net
 
-    st.subheader("Quanto paghi i singoli prodotti")
-    if rows:
-        summary_df=pd.DataFrame(rows)
-        sections=[
-            ("EDGE F", summary_df[summary_df["Famiglia"]=="EDGE F"]),
-            ("AQUA F", summary_df[summary_df["Famiglia"]=="AQUA F"]),
-            ("EDGE EVO 2.0", summary_df[summary_df["Famiglia"]=="EDGE EVO 2.0"]),
-            ("Bilico · EZCool", summary_df[summary_df["Famiglia"]=="EZCOOL"]),
-            ("Bilico · CRISTALLO 2", summary_df[summary_df["Famiglia"]=="CRISTALLO2"]),
-            ("NATIVE 2", summary_df[summary_df["Famiglia"]=="NATIVE 2"]),
-        ]
-        for section_title,section_df in sections:
-            if section_df.empty: continue
-            st.markdown(f"### {section_title}")
-            compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Totale netto"]].copy()
-            st.dataframe(compact,use_container_width=True,hide_index=True)
-    else:
-        st.info("Inserisci le quantità negli Addendum per vedere i netti effettivi.")
-    ctot1,ctot2=st.columns(2)
-    ctot1.metric("Totale prodotti dopo tutte le promo",euro(total_products))
-    ctot2.metric("Numero famiglie con ordini",len(set(r["Famiglia"] for r in rows)) if rows else 0)
+    st.subheader("Scenario premi al raggiungimento dei target")
+    sc1,sc2=st.columns(2)
+    annual_scenario=sc1.selectbox("Scenario premio annuale HOME + SPLIT",["80% → 1%","90% → 2%","100% → 4%","110% → 5%","120% → 6%"],index=2)
+    annual_rate={"80% → 1%":0.01,"90% → 2%":0.02,"100% → 4%":0.04,"110% → 5%":0.05,"120% → 6%":0.06}[annual_scenario]
+    include_q1=sc2.checkbox("Includi premio Q1 del 3%",value=True)
+    q1_rate=0.03 if include_q1 else 0.0
 
-    st.subheader("Simulazione premi")
+    # Premio Super Pre espresso come incidenza media sul valore programmato.
+    super_program=load_superpre_values(code)
+    def super_rate(family):
+        vals=super_program.get(family,{"q1":0,"q2":0})
+        q1=float(vals.get("q1",0) or 0); q2=float(vals.get("q2",0) or 0)
+        total=q1+q2
+        return ((q1*0.10+q2*0.05)/total) if total>0 else 0.0
+    split_super_rate=super_rate("SPLIT")
+    aqua_super_rate=super_rate("AQUA_F")
+
+    st.subheader("Quanto paghi ogni prodotto dopo tutti i premi")
+    summary_df=pd.DataFrame(rows) if rows else pd.DataFrame()
+    family_defs=[
+        ("EDGE F","EDGE F","SPLIT"),
+        ("AQUA F","AQUA F","AQUA"),
+        ("EDGE EVO 2.0","EDGE EVO 2.0","SPLIT"),
+        ("Bilico · EZCool","EZCOOL","SPLIT"),
+        ("Bilico · CRISTALLO 2","CRISTALLO2","SPLIT"),
+        ("NATIVE 2","NATIVE 2","SPLIT"),
+    ]
+    total_products_after_prizes=0.0
+    total_family_prizes=0.0
+    ordered_families=0
+    for section_title,family_key,award_group in family_defs:
+        section_df=summary_df[summary_df["Famiglia"]==family_key].copy() if not summary_df.empty else pd.DataFrame()
+        if section_df.empty:
+            continue
+        if award_group=="SPLIT":
+            rates=[("Super Pre SPLIT",split_super_rate),(f"Premio annuale {annual_scenario}",annual_rate),("Premio Q1",q1_rate)]
+        else:
+            rates=[("Super Pre AQUA F",aqua_super_rate)]
+        total_rate=min(sum(x[1] for x in rates),1.0)
+        rate_text=" + ".join(f"{name} {rate*100:.2f}%".replace(".",",") for name,rate in rates if rate>0) or "Nessun premio programmato"
+
+        def parse_euro(value):
+            text_value=str(value).replace("€","").replace(".","").replace(",",".").strip()
+            try: return float(text_value)
+            except: return 0.0
+        section_df["_netto_pre"] = section_df["Netto effettivo / pz"].map(parse_euro)
+        section_df["_qty"] = pd.to_numeric(section_df["Quantità"],errors="coerce").fillna(0)
+        section_df["Premio complessivo"] = f"{total_rate*100:.2f}%".replace(".",",")
+        section_df["Premio per pezzo"] = section_df["_netto_pre"].map(lambda v:euro(v*total_rate))
+        section_df["Netto finale dopo premi"] = section_df["_netto_pre"].map(lambda v:euro(max(v*(1-total_rate),0)))
+        section_df["Totale dopo premi"] = section_df.apply(lambda r:euro(max(r["_netto_pre"]*(1-total_rate),0)*r["_qty"]),axis=1)
+        family_before=float((section_df["_netto_pre"]*section_df["_qty"]).sum())
+        family_prize=family_before*total_rate
+        family_after=family_before-family_prize
+        total_family_prizes+=family_prize
+        total_products_after_prizes+=family_after
+        if section_df["_qty"].sum()>0: ordered_families+=1
+
+        st.markdown(f"### {section_title}")
+        m1,m2,m3,m4=st.columns(4)
+        m1.metric("Premio famiglia simulato",euro(family_prize),delta=f"{total_rate*100:.2f}%".replace(".",","))
+        m2.metric("Totale prima dei premi",euro(family_before))
+        m3.metric("Totale dopo i premi",euro(family_after))
+        m4.metric("Quantità famiglia",int(section_df["_qty"].sum()))
+        st.caption(rate_text)
+        compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Premio complessivo","Premio per pezzo","Netto finale dopo premi","Totale dopo premi"]]
+        st.dataframe(compact,use_container_width=True,hide_index=True)
+
+    st.subheader("Riepilogo complessivo")
+    r1,r2,r3=st.columns(3)
+    r1.metric("Premi complessivi sui prodotti",euro(total_family_prizes))
+    r2.metric("Totale prodotti dopo tutti i premi",euro(total_products_after_prizes))
+    r3.metric("Famiglie con ordini",ordered_families)
+
+    st.subheader("Dettaglio premi e target")
     total_prizes=0.0; prize_rows=[]
-    super_targets=load_superpre_values(code)
-    # Super Pre: programma salvato e target H1 ricavato dal dataset corrente, stessa logica della pagina dedicata.
     record=load_file(code)
     if record:
         parsed=read_export(io.BytesIO(bytes(record["content"]))); data=parsed[0] if isinstance(parsed,tuple) else parsed
@@ -1475,34 +1525,21 @@ def benefits_summary_page(user):
         split=catalogs[catalogs["Catalogo"].astype(str).str.strip().str.casefold()=="split"]
         aqua_f=families[families["Famiglia Prodotto"].astype(str).str.contains("aqua",case=False,na=False)]
         targets_sp={"SPLIT":float((split["Spedito Q1"]+split["Da Spedire Q1"]+split["Spedito Q2"]+split["Da Spedire Q2"]).sum()),"AQUA_F":float((aqua_f["Spedito Q1"]+aqua_f["Da Spedire Q1"]+aqua_f["Spedito Q2"]+aqua_f["Da Spedire Q2"]).sum())}
-        for fam,label in [("SPLIT","Super Pre SPLIT"),("AQUA_F","Super Pre AQUA F")]:
-            vals=super_targets.get(fam,{"q1":0,"q2":0}); q1=float(vals.get("q1",0)); q2=float(vals.get("q2",0)); target=targets_sp[fam]; reached=target>0 and round(q1+q2)>=round(target)
-            prize=(q1*.10+q2*.05) if reached else 0.0; total_prizes+=prize
-            prize_rows.append({"Premio":label,"Target":euro(target),"Valore simulato":euro(prize),"Stato":"Raggiunto" if reached else "Da raggiungere"})
-        agreement=load_commercial_agreement(code); locked=bool(agreement.get("snapshot_locked",False)); baseline=float(agreement.get("baseline_2026",0) or 0); baseline_q1=float(agreement.get("baseline_q1_2026",0) or 0)
-        hs=catalogs[catalogs["Catalogo"].astype(str).str.strip().str.casefold().isin(["home","split"])]
-        current_q1=float((hs["Spedito Q1"]+hs["Da Spedire Q1"]).sum()); current_year=float(hs["Totale Complessivo"].sum())
-        if locked and baseline>0:
-            rate=0.0
-            for threshold,r in [(0.80,.01),(0.90,.02),(1.00,.04),(1.10,.05),(1.20,.06)]:
-                if current_year/baseline>=threshold: rate=r
-            annual=current_year*rate if current_year>=50000 else 0.0
-            q1pr=current_q1*.03 if baseline_q1>0 and current_q1>=baseline_q1 and current_year>=50000 else 0.0
-            total_prizes+=annual+q1pr
-            prize_rows.append({"Premio":"Accordo commerciale annuale","Target":f"{rate*100:.0f}% maturato","Valore simulato":euro(annual),"Stato":"Maturato" if annual>0 else "Da raggiungere"})
-            prize_rows.append({"Premio":"Accordo commerciale Q1","Target":euro(baseline_q1),"Valore simulato":euro(q1pr),"Stato":"Raggiunto" if q1pr>0 else "Da raggiungere"})
+        for fam,label,rate in [("SPLIT","Super Pre SPLIT",split_super_rate),("AQUA_F","Super Pre AQUA F",aqua_super_rate)]:
+            vals=super_program.get(fam,{"q1":0,"q2":0}); q1=float(vals.get("q1",0)); q2=float(vals.get("q2",0)); target=targets_sp[fam]; programmed=q1+q2
+            potential=q1*.10+q2*.05
+            reached=target>0 and round(programmed)>=round(target)
+            total_prizes+=potential if reached else 0.0
+            prize_rows.append({"Premio":label,"Target":euro(target),"Programmazione":euro(programmed),"Percentuale media":f"{rate*100:.2f}%".replace(".",","),"Valore al raggiungimento":euro(potential),"Stato":"Raggiunto" if reached else "Da raggiungere"})
+        agreement=load_commercial_agreement(code); baseline=float(agreement.get("baseline_2026",0) or 0); baseline_q1=float(agreement.get("baseline_q1_2026",0) or 0)
+        target_annual=baseline*float(annual_scenario.split("%")[0])/100 if baseline>0 else 0.0
+        annual_value=target_annual*annual_rate
+        q1_value=baseline_q1*q1_rate if baseline_q1>0 else 0.0
+        prize_rows.append({"Premio":"Accordo commerciale annuale","Target":euro(target_annual),"Programmazione":"Scenario selezionato","Percentuale media":f"{annual_rate*100:.2f}%".replace(".",","),"Valore al raggiungimento":euro(annual_value),"Stato":"Simulazione"})
+        prize_rows.append({"Premio":"Accordo commerciale Q1","Target":euro(baseline_q1),"Programmazione":"Scenario selezionato","Percentuale media":f"{q1_rate*100:.2f}%".replace(".",","),"Valore al raggiungimento":euro(q1_value),"Stato":"Incluso" if include_q1 else "Escluso"})
     if prize_rows:
-        prize_df=pd.DataFrame(prize_rows)
-        super_df=prize_df[prize_df["Premio"].astype(str).str.startswith("Super Pre")]
-        commercial_df=prize_df[prize_df["Premio"].astype(str).str.startswith("Accordo commerciale")]
-        if not super_df.empty:
-            st.markdown("### Premi Super Pre")
-            st.dataframe(super_df,use_container_width=True,hide_index=True)
-        if not commercial_df.empty:
-            st.markdown("### Premi Accordo Commerciale")
-            st.dataframe(commercial_df,use_container_width=True,hide_index=True)
-    st.metric("Totale premi simulati",euro(total_prizes))
-    st.caption("Simulazione informativa basata sui dati e sulle condizioni salvate nelle sezioni Addendum. I premi definitivi restano soggetti alle condizioni dell'accordo commerciale.")
+        st.dataframe(pd.DataFrame(prize_rows),use_container_width=True,hide_index=True)
+    st.caption("Il netto finale per prodotto è una simulazione: al netto delle promozioni prodotto, degli omaggi ripartiti e dei premi percentuali selezionati nello scenario. I premi definitivi restano soggetti alle condizioni dell'accordo commerciale.")
 
 def targets_page():
     st.title("Target annuali")
