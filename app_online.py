@@ -914,7 +914,8 @@ def bilico_page(user):
         for size,net in info["sizes"]:
             qty=quantities.get((line,size),int(saved.get((line,size),0)))
             row_total=qty*net;subtotal+=row_total
-            rows.append({"Taglia":size,"Quantità":qty,"Prezzo netto Bilico":euro(net),"Totale":euro(row_total)})
+            net_after_extra=net*(1-extra/100)
+            rows.append({"Taglia":size,"Quantità":qty,"Prezzo netto Bilico":euro(net),"Extra sconto":f"{extra:.2f}%".replace(".",","),"Prezzo netto scontato":euro(net_after_extra),"Totale":euro(qty*net_after_extra)})
         extra_value=subtotal*(extra/100)
         final=max(subtotal-extra_value,0);grand_total+=final
         st.subheader(info["title"])
