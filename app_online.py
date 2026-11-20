@@ -1443,11 +1443,12 @@ def benefits_summary_page(user):
             total_products+=qty*net
 
     st.subheader("Scenario premi al raggiungimento dei target")
-    sc1,sc2=st.columns(2)
+    sc1,sc2,sc3=st.columns(3)
     annual_scenario=sc1.selectbox("Scenario premio annuale HOME + SPLIT",["80% → 1%","90% → 2%","100% → 4%","110% → 5%","120% → 6%"],index=2)
     annual_rate={"80% → 1%":0.01,"90% → 2%":0.02,"100% → 4%":0.04,"110% → 5%":0.05,"120% → 6%":0.06}[annual_scenario]
     include_q1=sc2.checkbox("Includi premio Q1 del 3%",value=True)
     q1_rate=0.03 if include_q1 else 0.0
+    simulated_quantity_discount=sc3.number_input("Sconto quantità simulato (%)",min_value=0.0,max_value=100.0,value=4.0,step=0.5,format="%.2f")
 
     # Premio Super Pre espresso come incidenza media sul valore programmato.
     super_program=load_superpre_values(code)
@@ -1469,9 +1470,11 @@ def benefits_summary_page(user):
     st.subheader("Quanto paghi ogni prodotto dopo tutti i premi")
     summary_df=pd.DataFrame(rows) if rows else pd.DataFrame()
     family_defs=[
-        ("EDGE F","EDGE F","SPLIT"),
-        ("AQUA F","AQUA F","AQUA"),
-        ("EDGE EVO 2.0","EDGE EVO 2.0","SPLIT"),
+        # EDGE F ed EDGE EVO 2.0 NON beneficiano del Super Pre 10%/5%.
+        # Beneficiano solo del premio Q1 3% (se Q1) e del premio annuale selezionato.
+        ("EDGE F","EDGE F","SPLIT_NO_SUPERPRE"),
+        ("AQUA F","AQUA F","HOME"),
+        ("EDGE EVO 2.0","EDGE EVO 2.0","SPLIT_NO_SUPERPRE"),
         ("Bilico · EZCool","EZCOOL","SPLIT"),
         ("Bilico · CRISTALLO 2","CRISTALLO2","SPLIT"),
         ("NATIVE 2","NATIVE 2","SPLIT"),
@@ -1483,14 +1486,17 @@ def benefits_summary_page(user):
         section_df=summary_df[summary_df["Famiglia"]==family_key].copy() if not summary_df.empty else pd.DataFrame()
         if section_df.empty:
             continue
-        # Due scenari alternativi, non cumulativi tra Q1 e Q2:
-        # Q1 = Super Pre 10% + premio Q1 3% + premio annuale selezionato.
-        # Q2 = Super Pre 5% + premio annuale selezionato.
-        q1_scenario_rate=min(0.10+q1_rate+annual_rate,1.0)
-        q2_scenario_rate=min(0.05+annual_rate,1.0)
-        super_q1=0.10
-        super_q2=0.05
-        rate_text=f"Scenario Q1: Super Pre 10% + Q1 {q1_rate*100:.0f}% + fine anno {annual_rate*100:.0f}% = {q1_scenario_rate*100:.0f}% · Scenario Q2: Super Pre 5% + fine anno {annual_rate*100:.0f}% = {q2_scenario_rate*100:.0f}%"
+        # Scenari premio differenziati per famiglia.
+        if award_group=="SPLIT_NO_SUPERPRE":
+            super_q1=0.0; super_q2=0.0
+            q1_scenario_rate=min(q1_rate+annual_rate,1.0)
+            q2_scenario_rate=min(annual_rate,1.0)
+            rate_text=f"Scenario Q1: Q1 {q1_rate*100:.0f}% + fine anno {annual_rate*100:.0f}% = {q1_scenario_rate*100:.0f}% · Scenario Q2: solo fine anno {annual_rate*100:.0f}%"
+        else:
+            super_q1=0.10; super_q2=0.05
+            q1_scenario_rate=min(super_q1+q1_rate+annual_rate,1.0)
+            q2_scenario_rate=min(super_q2+annual_rate,1.0)
+            rate_text=f"Scenario Q1: Super Pre 10% + Q1 {q1_rate*100:.0f}% + fine anno {annual_rate*100:.0f}% = {q1_scenario_rate*100:.0f}% · Scenario Q2: Super Pre 5% + fine anno {annual_rate*100:.0f}% = {q2_scenario_rate*100:.0f}%"
 
         def parse_euro(value):
             text_value=str(value).replace("€","").replace(".","").replace(",",".").strip()
@@ -1498,11 +1504,19 @@ def benefits_summary_page(user):
             except: return 0.0
         section_df["_netto_pre"] = section_df["Netto effettivo / pz"].map(parse_euro)
         section_df["_qty"] = pd.to_numeric(section_df["Quantità"],errors="coerce").fillna(0)
-        section_df["Super Pre Q1 10%"] = section_df["_netto_pre"].map(lambda v:euro(v*0.10))
+        # Simulazione: fissiamo lo sconto quantità al valore indicato (4% di default)
+        # per confrontare tutte le famiglie a parità di condizione.
+        def pct_num(value):
+            try: return float(str(value).replace("%","").replace(",","."))
+            except: return 0.0
+        actual_qdisc=section_df["Sconto quantità"].map(pct_num)
+        section_df["_netto_pre"] = section_df.apply(lambda r: r["_netto_pre"] * ((1-simulated_quantity_discount/100)/(1-pct_num(r["Sconto quantità"])/100)) if pct_num(r["Sconto quantità"]) < 100 else r["_netto_pre"],axis=1)
+        section_df["Sconto quantità"] = f"{simulated_quantity_discount:.2f}%".replace(".",",")
+        section_df["Super Pre Q1 10%"] = section_df["_netto_pre"].map(lambda v:euro(v*super_q1))
         section_df["Premio Q1 3%"] = section_df["_netto_pre"].map(lambda v:euro(v*q1_rate))
         section_df["Premio fine anno"] = section_df["_netto_pre"].map(lambda v:euro(v*annual_rate))
         section_df["Netto finale se Q1"] = section_df["_netto_pre"].map(lambda v:euro(max(v*(1-q1_scenario_rate),0)))
-        section_df["Super Pre Q2 5%"] = section_df["_netto_pre"].map(lambda v:euro(v*0.05))
+        section_df["Super Pre Q2 5%"] = section_df["_netto_pre"].map(lambda v:euro(v*super_q2))
         section_df["Netto finale se Q2"] = section_df["_netto_pre"].map(lambda v:euro(max(v*(1-q2_scenario_rate),0)))
         section_df["Totale se Q1"] = section_df.apply(lambda r:euro(max(r["_netto_pre"]*(1-q1_scenario_rate),0)*r["_qty"]),axis=1)
         section_df["Totale se Q2"] = section_df.apply(lambda r:euro(max(r["_netto_pre"]*(1-q2_scenario_rate),0)*r["_qty"]),axis=1)
@@ -1520,6 +1534,8 @@ def benefits_summary_page(user):
         m3.metric("Premio famiglia se Q2",euro(family_prize_q2),delta=f"{q2_scenario_rate*100:.0f}%")
         m4.metric("Totale netto se Q2",euro(family_after_q2))
         st.caption(rate_text)
+        if family_key in ("EDGE F","EDGE EVO 2.0"):
+            st.caption("EDGE F ed EDGE EVO 2.0 non beneficiano del Super Pre. Scenario Q1: premio Q1 3% + premio fine anno selezionato. Scenario Q2: solo premio fine anno selezionato.")
         if family_key=="AQUA F":
             st.caption("AQUA F è trattata come HOME: Super Pre 10% se fatturata nel Q1 oppure 5% se fatturata nel Q2, più premio Q1 HOME 3% e premio annuale HOME (100% = 4% nello scenario predefinito).")
         compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Super Pre Q1 10%","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Super Pre Q2 5%","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
