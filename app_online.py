@@ -1562,12 +1562,6 @@ def benefits_summary_page(user):
         if section_df["_qty"].sum()>0: ordered_families+=1
 
         st.markdown(f"### {section_title}")
-        m1,m2,m3,m4=st.columns(4)
-        m1.metric("Premio famiglia se Q1",euro(family_prize_q1),delta=f"{q1_scenario_rate*100:.0f}%")
-        m2.metric("Totale netto se Q1",euro(family_after_q1))
-        m3.metric("Premio famiglia se Q2",euro(family_prize_q2),delta=f"{q2_scenario_rate*100:.0f}%")
-        m4.metric("Totale netto se Q2",euro(family_after_q2))
-        st.caption(f"Quantità simulata per prodotto: {minimum_qty} pezzi (lotto minimo promo; quantità ordinate non considerate).")
         st.caption(rate_text)
         if family_key in ("EDGE F","EDGE EVO 2.0"):
             st.caption("EDGE F ed EDGE EVO 2.0 non beneficiano del Super Pre. Scenario Q1: premio Q1 3% + premio fine anno selezionato. Scenario Q2: solo premio fine anno selezionato.")
