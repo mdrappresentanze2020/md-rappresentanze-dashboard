@@ -25,6 +25,10 @@ html,body,[class*="css"],.stApp,.stApp *{font-family:"Aptos Display","Aptos","Se
 /* Testo sempre bianco in tutti i pulsanti/riquadri a sfondo scuro */
 button[kind="primary"],button[kind="secondary"],div[data-testid="stFormSubmitButton"] button,.stButton button{color:#ffffff!important}
 button[kind="primary"] *,button[kind="secondary"] *,div[data-testid="stFormSubmitButton"] button *,.stButton button *{color:#ffffff!important}
+/* Pulsante Apri PDF ben visibile */
+[data-testid="stDownloadButton"] button[kind="primary"]{background:#d63f4f!important;border-color:#d63f4f!important;color:#ffffff!important;font-weight:800!important}
+[data-testid="stDownloadButton"] button[kind="primary"] *{color:#ffffff!important}
+[data-testid="stDownloadButton"] button[kind="primary"]:hover{background:#b92f3f!important;border-color:#b92f3f!important}
 .brandline{background:#087dac;color:#fff;padding:12px 18px;border-radius:4px}
 .titleband{background:#dff27d;text-align:center;font-size:28px;font-weight:900;font-style:italic;padding:5px;margin:8px 0 16px}
 .months{display:grid;grid-template-columns:repeat(12,1fr);gap:2px}
@@ -509,7 +513,7 @@ def dashboard(data, code, name):
                     if pdf_record:
                         r5.download_button(
                             "Apri PDF",data=pdf_record["content"],file_name=pdf_record["filename"],mime="application/pdf",
-                            key=f"row_pdf_{code}_{selected_catalog}_{safe_family}_{selected_family_order}",use_container_width=True
+                            key=f"row_pdf_{code}_{selected_catalog}_{safe_family}_{selected_family_order}",use_container_width=True,type="primary"
                         )
             else:
                 r5.caption("Nessuna CO da spedire")
@@ -580,19 +584,18 @@ def dashboard(data, code, name):
                 range_display[col] = range_display[col].map(euro)
             st.dataframe(range_display, use_container_width=True, hide_index=True)
 
-        with st.popover("Mostra dettaglio trimestrale",use_container_width=True):
-            st.markdown('<div class="quarter-detail-title">Dettaglio trimestrale della conferma</div>',unsafe_allow_html=True)
-            quarter_table = pd.DataFrame({
-                "Voce":["Spedito","Da Spedire","Totale"],
-                "Q1":[selected_row["Spedito Q1"],selected_row["Da Spedire Q1"],selected_row["Spedito Q1"]+selected_row["Da Spedire Q1"]],
-                "Q2":[selected_row["Spedito Q2"],selected_row["Da Spedire Q2"],selected_row["Spedito Q2"]+selected_row["Da Spedire Q2"]],
-                "Q3":[selected_row["Spedito Q3"],selected_row["Da Spedire Q3"],selected_row["Spedito Q3"]+selected_row["Da Spedire Q3"]],
-                "Q4":[selected_row["Spedito Q4"],selected_row["Da Spedire Q4"],selected_row["Spedito Q4"]+selected_row["Da Spedire Q4"]],
-                "Totale":[selected_row["Spedito Totale"],selected_row["Da Spedire Totale"],selected_row["Totale Complessivo"]]
-            })
-            for col in ["Q1","Q2","Q3","Q4","Totale"]:
-                quarter_table[col] = quarter_table[col].map(euro)
-            st.dataframe(quarter_table, use_container_width=True, hide_index=True)
+        st.markdown('<div class="quarter-detail-title">Dettaglio trimestrale della conferma</div>',unsafe_allow_html=True)
+        quarter_table = pd.DataFrame({
+            "Voce":["Spedito","Da Spedire","Totale"],
+            "Q1":[selected_row["Spedito Q1"],selected_row["Da Spedire Q1"],selected_row["Spedito Q1"]+selected_row["Da Spedire Q1"]],
+            "Q2":[selected_row["Spedito Q2"],selected_row["Da Spedire Q2"],selected_row["Spedito Q2"]+selected_row["Da Spedire Q2"]],
+            "Q3":[selected_row["Spedito Q3"],selected_row["Da Spedire Q3"],selected_row["Spedito Q3"]+selected_row["Da Spedire Q3"]],
+            "Q4":[selected_row["Spedito Q4"],selected_row["Da Spedire Q4"],selected_row["Spedito Q4"]+selected_row["Da Spedire Q4"]],
+            "Totale":[selected_row["Spedito Totale"],selected_row["Da Spedire Totale"],selected_row["Totale Complessivo"]]
+        })
+        for col in ["Q1","Q2","Q3","Q4","Totale"]:
+            quarter_table[col] = quarter_table[col].map(euro)
+        st.dataframe(quarter_table, use_container_width=True, hide_index=True)
 
 def admin_dashboard():
     st.title("Cruscotto generale MD Rappresentanze")
