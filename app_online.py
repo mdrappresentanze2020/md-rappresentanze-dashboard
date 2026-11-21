@@ -42,11 +42,17 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
 /* Testi dashboard sempre visibili su sfondo chiaro */
 [data-testid="stMain"] h1,[data-testid="stMain"] h2,[data-testid="stMain"] h3,[data-testid="stMain"] p,[data-testid="stMain"] strong{color:#202124!important}
 [data-testid="stExpander"] summary,[data-testid="stExpander"] summary *{color:#202124!important;font-weight:700!important}
+/* Intestazioni expander: una sola riga leggibile, senza sovrapposizioni */
+[data-testid="stExpander"] details>summary{min-height:52px!important;padding:12px 16px!important;display:flex!important;align-items:center!important;line-height:1.35!important;overflow:visible!important}
+[data-testid="stExpander"] details>summary p{margin:0!important;padding:0!important;line-height:1.35!important;white-space:normal!important;position:static!important}
+[data-testid="stExpander"] details>summary svg{flex:0 0 auto!important;margin-right:8px!important}
+[data-testid="stExpander"] [data-testid="stExpanderDetails"]{padding-top:14px!important}
 /* Login: etichette e testo digitato sempre neri */
 [data-testid="stForm"] label p{color:#000000!important;font-weight:700!important}
 [data-testid="stForm"] input{color:#000000!important;background:#ffffff!important;-webkit-text-fill-color:#000000!important}
 [data-testid="stForm"] input::placeholder{color:#6b7280!important;opacity:1!important}
 [data-testid="stForm"] [data-testid="stTextInput"] div{color:#000000!important}
+.quarter-detail-title{display:block;width:100%;font-size:20px;font-weight:800;color:#202124!important;line-height:1.35;padding:2px 0 14px;margin:0 0 10px;border-bottom:1px solid #d7dde5;clear:both}
 .login-logo{text-align:center;margin-bottom:12px}.client-card{background:#fff;border:1px solid #d7dde5;border-left:5px solid #087dac;border-radius:9px;padding:14px;margin-bottom:10px}
 </style>""", unsafe_allow_html=True)
 
@@ -580,7 +586,8 @@ def dashboard(data, code, name):
                 range_display[col] = range_display[col].map(euro)
             st.dataframe(range_display, use_container_width=True, hide_index=True)
 
-        with st.expander("Dettaglio trimestrale della conferma"):
+        with st.expander("Apri dettaglio trimestrale",expanded=False):
+            st.markdown('<div class="quarter-detail-title">Dettaglio trimestrale della conferma</div>',unsafe_allow_html=True)
             quarter_table = pd.DataFrame({
                 "Voce":["Spedito","Da Spedire","Totale"],
                 "Q1":[selected_row["Spedito Q1"],selected_row["Da Spedire Q1"],selected_row["Spedito Q1"]+selected_row["Da Spedire Q1"]],
