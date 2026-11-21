@@ -56,6 +56,42 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
 .family-grid-row{display:grid;grid-template-columns:2.2fr 1.1fr 1.1fr 1.1fr 1.6fr;border-left:1px solid #cfd3d8;border-right:1px solid #cfd3d8;border-top:1px solid #cfd3d8;background:#fff;min-height:64px;align-items:center}
 .family-grid-row.last{border-bottom:1px solid #cfd3d8;border-radius:0 0 9px 9px}.family-grid-cell{padding:10px 12px;border-right:1px solid #cfd3d8;min-height:63px;display:flex;align-items:center}.family-grid-cell:last-child{border-right:0}.family-grid-cell strong{font-weight:800;color:#202124!important}
 .quarter-detail-title{display:block;width:100%;font-size:20px;font-weight:800;color:#202124!important;line-height:1.35;padding:2px 0 14px;margin:0 0 10px;border-bottom:1px solid #d7dde5;clear:both}
+/* Layout responsive per iPhone e Android */
+@media (max-width: 768px){
+  .block-container{padding:4.6rem .75rem 2rem!important;max-width:100%!important}
+  [data-testid="stSidebar"]{min-width:82vw!important;max-width:82vw!important}
+  [data-testid="stMain"] h1{font-size:24px!important;line-height:1.2!important;padding:8px 10px!important}
+  [data-testid="stMain"] h2{font-size:21px!important;line-height:1.25!important}
+  [data-testid="stMain"] h3{font-size:18px!important;line-height:1.3!important}
+  [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:.65rem!important}
+  [data-testid="column"]{min-width:100%!important;width:100%!important;flex:1 1 100%!important}
+  .stMetric{padding:12px!important;margin-bottom:6px!important}
+  [data-testid="stMetricValue"]{font-size:24px!important}
+  button,[data-testid="stDownloadButton"] button,[data-testid="stFormSubmitButton"] button{min-height:48px!important;font-size:16px!important}
+  [data-testid="stSelectbox"]>div,[data-testid="stNumberInput"]>div,[data-testid="stTextInput"]>div{min-height:48px!important}
+  [data-testid="stDataFrame"]{overflow-x:auto!important;max-width:100%!important}
+  .family-grid-header{display:none!important}
+  .family-grid-row{display:grid!important;grid-template-columns:1fr 1fr!important;border:1px solid #cfd3d8!important;border-radius:10px!important;margin:10px 0!important;overflow:hidden!important;min-height:auto!important}
+  .family-grid-cell{min-height:48px!important;padding:9px 10px!important;border-right:0!important;border-bottom:1px solid #e2e5e9!important;display:block!important}
+  .family-grid-cell:nth-child(1){grid-column:1/-1;background:#2c2925;color:#fff!important}
+  .family-grid-cell:nth-child(1) strong{color:#fff!important}
+  .family-grid-cell:nth-child(2)::before{content:"Spedito";display:block;font-size:12px;color:#6b7280;font-weight:700}
+  .family-grid-cell:nth-child(3)::before{content:"Da spedire";display:block;font-size:12px;color:#6b7280;font-weight:700}
+  .family-grid-cell:nth-child(4)::before{content:"Totale";display:block;font-size:12px;color:#6b7280;font-weight:700}
+  .family-grid-cell:nth-child(5){grid-column:1/-1;border-bottom:0!important}
+  .family-grid-cell:nth-child(5)::before{content:"Conferma ordine da spedire";display:block;font-size:12px;color:#6b7280;font-weight:700;margin-bottom:3px}
+  .months{grid-template-columns:repeat(4,1fr)!important;gap:4px!important}
+  .quarter-detail-title{font-size:18px!important;padding-bottom:9px!important}
+  .login-md{left:20px!important;top:88px!important;width:220px!important}
+  div[data-testid="stForm"]{max-width:calc(100% - 24px)!important;margin:210px 12px 20px!important;padding:22px 18px!important}
+}
+@media (max-width: 420px){
+  .block-container{padding-left:.5rem!important;padding-right:.5rem!important}
+  [data-testid="stMain"] h1{font-size:21px!important}
+  .family-grid-row{grid-template-columns:1fr!important}
+  .family-grid-cell{grid-column:1!important}
+  .months{grid-template-columns:repeat(3,1fr)!important}
+}
 .login-logo{text-align:center;margin-bottom:12px}.client-card{background:#fff;border:1px solid #d7dde5;border-left:5px solid #087dac;border-radius:9px;padding:14px;margin-bottom:10px}
 </style>""", unsafe_allow_html=True)
 
