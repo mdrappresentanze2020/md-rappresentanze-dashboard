@@ -51,6 +51,10 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
 [data-testid="stForm"] input{color:#000000!important;background:#ffffff!important;-webkit-text-fill-color:#000000!important}
 [data-testid="stForm"] input::placeholder{color:#6b7280!important;opacity:1!important}
 [data-testid="stForm"] [data-testid="stTextInput"] div{color:#000000!important}
+.family-grid-header{display:grid;grid-template-columns:2.2fr 1.1fr 1.1fr 1.1fr 1.6fr;background:#2c2925;color:#fff;border:1px solid #f28c45;border-bottom:0;border-radius:9px 9px 0 0;overflow:hidden;font-weight:700}
+.family-grid-header>div{padding:11px 12px;border-right:1px solid #4a4640}.family-grid-header>div:last-child{border-right:0}
+.family-grid-row{display:grid;grid-template-columns:2.2fr 1.1fr 1.1fr 1.1fr 1.6fr;border-left:1px solid #cfd3d8;border-right:1px solid #cfd3d8;border-top:1px solid #cfd3d8;background:#fff;min-height:64px;align-items:center}
+.family-grid-row.last{border-bottom:1px solid #cfd3d8;border-radius:0 0 9px 9px}.family-grid-cell{padding:10px 12px;border-right:1px solid #cfd3d8;min-height:63px;display:flex;align-items:center}.family-grid-cell:last-child{border-right:0}.family-grid-cell strong{font-weight:800;color:#202124!important}
 .quarter-detail-title{display:block;width:100%;font-size:20px;font-weight:800;color:#202124!important;line-height:1.35;padding:2px 0 14px;margin:0 0 10px;border-bottom:1px solid #d7dde5;clear:both}
 .login-logo{text-align:center;margin-bottom:12px}.client-card{background:#fff;border:1px solid #d7dde5;border-left:5px solid #087dac;border-radius:9px;padding:14px;margin-bottom:10px}
 </style>""", unsafe_allow_html=True)
@@ -477,46 +481,39 @@ def dashboard(data, code, name):
             "Da Spedire Totale":"Da Spedire",
             "Totale Complessivo":"Totale"
         })
-        # Visualizzazione per famiglia con menu CO dedicato: ogni menu contiene solo le CO della riga/famiglia.
+        # Tabella famiglia con intestazioni, righe e colonne delimitate.
         family_source = ranges[ranges["Catalogo"] == selected_catalog].copy()
         if family_source.empty:
             family_source = families[families["Catalogo"] == selected_catalog].copy()
-        for row_idx,row in family_summary.iterrows():
+        st.markdown('<div class="family-grid-header"><div>Famiglia Prodotto</div><div>Spedito</div><div>Da Spedire</div><div>Totale</div><div>Conferma ordine da spedire</div></div>',unsafe_allow_html=True)
+        family_rows_list=list(family_summary.iterrows())
+        for pos,(row_idx,row) in enumerate(family_rows_list):
             family_name=str(row["Famiglia Prodotto"])
             fam_rows=family_source[family_source["Famiglia Prodotto"].astype(str)==family_name].copy()
-            # Nel menu della riga mostra solo le CO della stessa famiglia con importo ancora da spedire > 0.
             pending_by_order=fam_rows.groupby("Numero Ordine",as_index=False)["Da Spedire Totale"].sum()
             pending_by_order=pending_by_order[pending_by_order["Da Spedire Totale"]>0]
             family_orders=sorted(
                 [v for v in pending_by_order["Numero Ordine"].dropna().astype(str).unique().tolist() if v and v!="Total"],
                 key=lambda x:(int(re.sub(r"\D","",x) or 0),x),reverse=True
             )
-            r1,r2,r3,r4,r5=st.columns([2.2,1.1,1.1,1.1,1.6])
-            r1.write(f"**{family_name}**")
-            r2.write(euro(row["Spedito Totale"]))
-            r3.write(euro(row["Da Spedire Totale"]))
-            r4.write(euro(row["Totale Complessivo"]))
+            last_class=" last" if pos==len(family_rows_list)-1 else ""
+            st.markdown(
+                f'<div class="family-grid-row{last_class}"><div class="family-grid-cell"><strong>{family_name}</strong></div><div class="family-grid-cell">{euro(row["Spedito Totale"])}</div><div class="family-grid-cell">{euro(row["Da Spedire Totale"])}</div><div class="family-grid-cell">{euro(row["Totale Complessivo"])}</div><div class="family-grid-cell">{"Seleziona CO" if family_orders else "Nessuna CO da spedire"}</div></div>',
+                unsafe_allow_html=True
+            )
             safe_family=re.sub(r'[^A-Za-z0-9]+','_',family_name)
             if family_orders:
-                selected_family_order=r5.selectbox(
-                    "Conferma ordine",
-                    [""]+family_orders,
-                    key=f"row_co_{code}_{selected_catalog}_{safe_family}",
-                    label_visibility="collapsed"
+                s1,s2=st.columns([4.5,1.5])
+                selected_family_order=s1.selectbox(
+                    f"CO da spedire · {family_name}",[""]+family_orders,key=f"row_co_{code}_{selected_catalog}_{safe_family}",label_visibility="collapsed"
                 )
                 if selected_family_order:
                     pdf_record,pdf_error=load_google_order_pdf(code,selected_family_order)
                     if not pdf_record:
                         neon_pdf=load_order_pdf(code,selected_family_order)
-                        if neon_pdf:
-                            pdf_record={"filename":neon_pdf["filename"],"content":bytes(neon_pdf["content"]),"source":"Archivio manuale"}
+                        if neon_pdf: pdf_record={"filename":neon_pdf["filename"],"content":bytes(neon_pdf["content"]),"source":"Archivio manuale"}
                     if pdf_record:
-                        r5.download_button(
-                            "Apri PDF",data=pdf_record["content"],file_name=pdf_record["filename"],mime="application/pdf",
-                            key=f"row_pdf_{code}_{selected_catalog}_{safe_family}_{selected_family_order}",use_container_width=True,type="primary"
-                        )
-            else:
-                r5.caption("Nessuna CO da spedire")
+                        s2.download_button("Apri PDF",data=pdf_record["content"],file_name=pdf_record["filename"],mime="application/pdf",key=f"row_pdf_{code}_{selected_catalog}_{safe_family}_{selected_family_order}",use_container_width=True,type="primary")
 
     if selected_order:
         selected_row = catalog_orders[catalog_orders["Numero Ordine"] == selected_order].iloc[0]
