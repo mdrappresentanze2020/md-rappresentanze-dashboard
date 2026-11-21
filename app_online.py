@@ -580,7 +580,7 @@ def dashboard(data, code, name):
                 range_display[col] = range_display[col].map(euro)
             st.dataframe(range_display, use_container_width=True, hide_index=True)
 
-        with st.expander("Mostra dettaglio", expanded=False):
+        with st.popover("Mostra dettaglio trimestrale",use_container_width=True):
             st.markdown('<div class="quarter-detail-title">Dettaglio trimestrale della conferma</div>',unsafe_allow_html=True)
             quarter_table = pd.DataFrame({
                 "Voce":["Spedito","Da Spedire","Totale"],
