@@ -472,53 +472,47 @@ def dashboard(data, code, name):
             "Da Spedire Totale":"Da Spedire",
             "Totale Complessivo":"Totale"
         })
-        for col in ["Spedito","Da Spedire","Totale"]:
-            family_display[col] = family_display[col].map(euro)
-        st.dataframe(family_display, use_container_width=True, hide_index=True)
-
-        st.markdown("### Conferme ordine per famiglia prodotto")
-        st.caption("Apri una famiglia per visualizzare esclusivamente le conferme ordine collegate.")
+        # Aggiunge direttamente nella tabella un menu a tendina con le CO relative a ogni famiglia.
         family_source = ranges[ranges["Catalogo"] == selected_catalog].copy()
         if family_source.empty:
             family_source = families[families["Catalogo"] == selected_catalog].copy()
-        for family_name in family_summary["Famiglia Prodotto"].dropna().astype(str).tolist():
-            family_orders = family_source[family_source["Famiglia Prodotto"].astype(str) == family_name].copy()
-            order_numbers = sorted(
-                [v for v in family_orders["Numero Ordine"].dropna().astype(str).unique().tolist() if v and v != "Total"],
-                key=lambda x: (int(re.sub(r"\D", "", x) or 0), x), reverse=True
-            )
-            with st.expander(f"{family_name} · {len(order_numbers)} conferme ordine"):
-                if not order_numbers:
-                    st.info("Nessuna conferma ordine associata a questa famiglia.")
-                    continue
-                family_order = st.selectbox(
-                    "Conferma ordine della famiglia",
-                    order_numbers,
-                    key=f"family_order_{code}_{selected_catalog}_{re.sub(r'[^A-Za-z0-9]+','_',family_name)}"
-                )
-                order_family_rows = family_orders[family_orders["Numero Ordine"].astype(str) == family_order]
-                shipped = float(order_family_rows["Spedito Totale"].sum())
-                pending = float(order_family_rows["Da Spedire Totale"].sum())
-                total_family_order = float(order_family_rows["Totale Complessivo"].sum())
-                fc1,fc2,fc3,fc4=st.columns(4)
-                fc1.metric("Conferma ordine",family_order)
-                fc2.metric("Spedito",euro(shipped))
-                fc3.metric("Da spedire",euro(pending))
-                fc4.metric("Totale famiglia nella CO",euro(total_family_order))
-                pdf_record, pdf_error = load_google_order_pdf(code, family_order)
-                if not pdf_record:
-                    neon_pdf = load_order_pdf(code, family_order)
-                    if neon_pdf:
-                        pdf_record={"filename":neon_pdf["filename"],"content":bytes(neon_pdf["content"]),"source":"Archivio manuale"}
-                if pdf_record:
-                    st.download_button(
-                        "Apri / Scarica conferma PDF",data=pdf_record["content"],file_name=pdf_record["filename"],
-                        mime="application/pdf",key=f"family_pdf_{code}_{selected_catalog}_{family_order}_{re.sub(r'[^A-Za-z0-9]+','_',family_name)}",type="primary"
-                    )
-                elif pdf_error:
-                    st.warning(pdf_error)
-                else:
-                    st.info("PDF conferma non ancora disponibile.")
+        family_order_map={}
+        all_family_orders=[]
+        for family_name in family_display["Famiglia Prodotto"].astype(str):
+            fam_rows=family_source[family_source["Famiglia Prodotto"].astype(str)==family_name]
+            options=sorted([v for v in fam_rows["Numero Ordine"].dropna().astype(str).unique().tolist() if v and v!="Total"],key=lambda x:(int(re.sub(r"\D","",x) or 0),x),reverse=True)
+            family_order_map[family_name]=options
+            all_family_orders.extend(options)
+        all_family_orders=list(dict.fromkeys(all_family_orders))
+        family_display["Conferma ordine"]=[(family_order_map.get(str(f),[""])[0] if family_order_map.get(str(f)) else "") for f in family_display["Famiglia Prodotto"]]
+        for col in ["Spedito","Da Spedire","Totale"]:
+            family_display[col] = family_display[col].map(euro)
+        edited_family=st.data_editor(
+            family_display,
+            use_container_width=True,
+            hide_index=True,
+            disabled=["Famiglia Prodotto","Spedito","Da Spedire","Totale"],
+            column_config={
+                "Conferma ordine":st.column_config.SelectboxColumn("Conferma ordine",options=all_family_orders,required=False)
+            },
+            key=f"family_orders_table_{code}_{selected_catalog}"
+        )
+        selected_family_row=edited_family[edited_family["Conferma ordine"].astype(str).str.len()>0]
+        if not selected_family_row.empty:
+            chosen=selected_family_row.iloc[0]
+            chosen_family=str(chosen["Famiglia Prodotto"]); chosen_order=str(chosen["Conferma ordine"])
+            # Accetta la selezione solo se la CO appartiene davvero alla famiglia della riga.
+            if chosen_order in family_order_map.get(chosen_family,[]):
+                family_order_rows=family_source[(family_source["Famiglia Prodotto"].astype(str)==chosen_family)&(family_source["Numero Ordine"].astype(str)==chosen_order)]
+                if not family_order_rows.empty:
+                    st.caption(f"{chosen_family} · Conferma ordine {chosen_order}")
+                    pdf_record,pdf_error=load_google_order_pdf(code,chosen_order)
+                    if not pdf_record:
+                        neon_pdf=load_order_pdf(code,chosen_order)
+                        if neon_pdf: pdf_record={"filename":neon_pdf["filename"],"content":bytes(neon_pdf["content"]),"source":"Archivio manuale"}
+                    if pdf_record:
+                        st.download_button("Apri / Scarica conferma PDF",data=pdf_record["content"],file_name=pdf_record["filename"],mime="application/pdf",key=f"family_inline_pdf_{code}_{selected_catalog}_{chosen_family}_{chosen_order}",type="primary")
+
 
     if selected_order:
         selected_row = catalog_orders[catalog_orders["Numero Ordine"] == selected_order].iloc[0]
