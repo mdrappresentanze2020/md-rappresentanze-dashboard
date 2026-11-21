@@ -476,6 +476,50 @@ def dashboard(data, code, name):
             family_display[col] = family_display[col].map(euro)
         st.dataframe(family_display, use_container_width=True, hide_index=True)
 
+        st.markdown("### Conferme ordine per famiglia prodotto")
+        st.caption("Apri una famiglia per visualizzare esclusivamente le conferme ordine collegate.")
+        family_source = ranges[ranges["Catalogo"] == selected_catalog].copy()
+        if family_source.empty:
+            family_source = families[families["Catalogo"] == selected_catalog].copy()
+        for family_name in family_summary["Famiglia Prodotto"].dropna().astype(str).tolist():
+            family_orders = family_source[family_source["Famiglia Prodotto"].astype(str) == family_name].copy()
+            order_numbers = sorted(
+                [v for v in family_orders["Numero Ordine"].dropna().astype(str).unique().tolist() if v and v != "Total"],
+                key=lambda x: (int(re.sub(r"\D", "", x) or 0), x), reverse=True
+            )
+            with st.expander(f"{family_name} · {len(order_numbers)} conferme ordine"):
+                if not order_numbers:
+                    st.info("Nessuna conferma ordine associata a questa famiglia.")
+                    continue
+                family_order = st.selectbox(
+                    "Conferma ordine della famiglia",
+                    order_numbers,
+                    key=f"family_order_{code}_{selected_catalog}_{re.sub(r'[^A-Za-z0-9]+','_',family_name)}"
+                )
+                order_family_rows = family_orders[family_orders["Numero Ordine"].astype(str) == family_order]
+                shipped = float(order_family_rows["Spedito Totale"].sum())
+                pending = float(order_family_rows["Da Spedire Totale"].sum())
+                total_family_order = float(order_family_rows["Totale Complessivo"].sum())
+                fc1,fc2,fc3,fc4=st.columns(4)
+                fc1.metric("Conferma ordine",family_order)
+                fc2.metric("Spedito",euro(shipped))
+                fc3.metric("Da spedire",euro(pending))
+                fc4.metric("Totale famiglia nella CO",euro(total_family_order))
+                pdf_record, pdf_error = load_google_order_pdf(code, family_order)
+                if not pdf_record:
+                    neon_pdf = load_order_pdf(code, family_order)
+                    if neon_pdf:
+                        pdf_record={"filename":neon_pdf["filename"],"content":bytes(neon_pdf["content"]),"source":"Archivio manuale"}
+                if pdf_record:
+                    st.download_button(
+                        "Apri / Scarica conferma PDF",data=pdf_record["content"],file_name=pdf_record["filename"],
+                        mime="application/pdf",key=f"family_pdf_{code}_{selected_catalog}_{family_order}_{re.sub(r'[^A-Za-z0-9]+','_',family_name)}",type="primary"
+                    )
+                elif pdf_error:
+                    st.warning(pdf_error)
+                else:
+                    st.info("PDF conferma non ancora disponibile.")
+
     if selected_order:
         selected_row = catalog_orders[catalog_orders["Numero Ordine"] == selected_order].iloc[0]
         st.markdown("**Dettaglio conferma ordine selezionata**")
