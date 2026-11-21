@@ -41,9 +41,6 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
 [data-testid="stMetricValue"]{color:#4F8FC5!important}
 /* Testi dashboard sempre visibili su sfondo chiaro */
 [data-testid="stMain"] h1,[data-testid="stMain"] h2,[data-testid="stMain"] h3,[data-testid="stMain"] p,[data-testid="stMain"] strong{color:#202124!important}
-[data-testid="stExpander"] summary,[data-testid="stExpander"] summary *{color:#202124!important;font-weight:700!important}
-[data-testid="stExpander"] summary{padding-top:12px!important;padding-bottom:12px!important}
-[data-testid="stExpander"] summary p{margin:0!important;line-height:1.4!important}
 /* Intestazioni expander: una sola riga leggibile, senza sovrapposizioni */
 /* Login: etichette e testo digitato sempre neri */
 [data-testid="stForm"] label p{color:#000000!important;font-weight:700!important}
@@ -476,47 +473,46 @@ def dashboard(data, code, name):
             "Da Spedire Totale":"Da Spedire",
             "Totale Complessivo":"Totale"
         })
-        # Aggiunge direttamente nella tabella un menu a tendina con le CO relative a ogni famiglia.
+        # Visualizzazione per famiglia con menu CO dedicato: ogni menu contiene solo le CO della riga/famiglia.
         family_source = ranges[ranges["Catalogo"] == selected_catalog].copy()
         if family_source.empty:
             family_source = families[families["Catalogo"] == selected_catalog].copy()
-        family_order_map={}
-        all_family_orders=[]
-        for family_name in family_display["Famiglia Prodotto"].astype(str):
-            fam_rows=family_source[family_source["Famiglia Prodotto"].astype(str)==family_name]
-            options=sorted([v for v in fam_rows["Numero Ordine"].dropna().astype(str).unique().tolist() if v and v!="Total"],key=lambda x:(int(re.sub(r"\D","",x) or 0),x),reverse=True)
-            family_order_map[family_name]=options
-            all_family_orders.extend(options)
-        all_family_orders=list(dict.fromkeys(all_family_orders))
-        family_display["Conferma ordine"]=[(family_order_map.get(str(f),[""])[0] if family_order_map.get(str(f)) else "") for f in family_display["Famiglia Prodotto"]]
-        for col in ["Spedito","Da Spedire","Totale"]:
-            family_display[col] = family_display[col].map(euro)
-        edited_family=st.data_editor(
-            family_display,
-            use_container_width=True,
-            hide_index=True,
-            disabled=["Famiglia Prodotto","Spedito","Da Spedire","Totale"],
-            column_config={
-                "Conferma ordine":st.column_config.SelectboxColumn("Conferma ordine",options=all_family_orders,required=False)
-            },
-            key=f"family_orders_table_{code}_{selected_catalog}"
-        )
-        selected_family_row=edited_family[edited_family["Conferma ordine"].astype(str).str.len()>0]
-        if not selected_family_row.empty:
-            chosen=selected_family_row.iloc[0]
-            chosen_family=str(chosen["Famiglia Prodotto"]); chosen_order=str(chosen["Conferma ordine"])
-            # Accetta la selezione solo se la CO appartiene davvero alla famiglia della riga.
-            if chosen_order in family_order_map.get(chosen_family,[]):
-                family_order_rows=family_source[(family_source["Famiglia Prodotto"].astype(str)==chosen_family)&(family_source["Numero Ordine"].astype(str)==chosen_order)]
-                if not family_order_rows.empty:
-                    st.caption(f"{chosen_family} · Conferma ordine {chosen_order}")
-                    pdf_record,pdf_error=load_google_order_pdf(code,chosen_order)
+        for row_idx,row in family_summary.iterrows():
+            family_name=str(row["Famiglia Prodotto"])
+            fam_rows=family_source[family_source["Famiglia Prodotto"].astype(str)==family_name].copy()
+            # Nel menu della riga mostra solo le CO della stessa famiglia con importo ancora da spedire > 0.
+            pending_by_order=fam_rows.groupby("Numero Ordine",as_index=False)["Da Spedire Totale"].sum()
+            pending_by_order=pending_by_order[pending_by_order["Da Spedire Totale"]>0]
+            family_orders=sorted(
+                [v for v in pending_by_order["Numero Ordine"].dropna().astype(str).unique().tolist() if v and v!="Total"],
+                key=lambda x:(int(re.sub(r"\D","",x) or 0),x),reverse=True
+            )
+            r1,r2,r3,r4,r5=st.columns([2.2,1.1,1.1,1.1,1.6])
+            r1.write(f"**{family_name}**")
+            r2.write(euro(row["Spedito Totale"]))
+            r3.write(euro(row["Da Spedire Totale"]))
+            r4.write(euro(row["Totale Complessivo"]))
+            safe_family=re.sub(r'[^A-Za-z0-9]+','_',family_name)
+            if family_orders:
+                selected_family_order=r5.selectbox(
+                    "Conferma ordine",
+                    [""]+family_orders,
+                    key=f"row_co_{code}_{selected_catalog}_{safe_family}",
+                    label_visibility="collapsed"
+                )
+                if selected_family_order:
+                    pdf_record,pdf_error=load_google_order_pdf(code,selected_family_order)
                     if not pdf_record:
-                        neon_pdf=load_order_pdf(code,chosen_order)
-                        if neon_pdf: pdf_record={"filename":neon_pdf["filename"],"content":bytes(neon_pdf["content"]),"source":"Archivio manuale"}
+                        neon_pdf=load_order_pdf(code,selected_family_order)
+                        if neon_pdf:
+                            pdf_record={"filename":neon_pdf["filename"],"content":bytes(neon_pdf["content"]),"source":"Archivio manuale"}
                     if pdf_record:
-                        st.download_button("Apri / Scarica conferma PDF",data=pdf_record["content"],file_name=pdf_record["filename"],mime="application/pdf",key=f"family_inline_pdf_{code}_{selected_catalog}_{chosen_family}_{chosen_order}",type="primary")
-
+                        r5.download_button(
+                            "Apri PDF",data=pdf_record["content"],file_name=pdf_record["filename"],mime="application/pdf",
+                            key=f"row_pdf_{code}_{selected_catalog}_{safe_family}_{selected_family_order}",use_container_width=True
+                        )
+            else:
+                r5.caption("Nessuna CO da spedire")
 
     if selected_order:
         selected_row = catalog_orders[catalog_orders["Numero Ordine"] == selected_order].iloc[0]
@@ -584,7 +580,7 @@ def dashboard(data, code, name):
                 range_display[col] = range_display[col].map(euro)
             st.dataframe(range_display, use_container_width=True, hide_index=True)
 
-        with st.expander("Dettaglio trimestrale", expanded=False):
+        with st.expander("Mostra dettaglio", expanded=False):
             st.markdown('<div class="quarter-detail-title">Dettaglio trimestrale della conferma</div>',unsafe_allow_html=True)
             quarter_table = pd.DataFrame({
                 "Voce":["Spedito","Da Spedire","Totale"],
