@@ -17,7 +17,10 @@ st.markdown("""<style>
 html,body,[class*="css"],.stApp,.stApp *{font-family:"Aptos Display","Aptos","Segoe UI",Arial,sans-serif!important}
 /* Uniforma tutto il testo della UI su Aptos Display e rende leggibili i delta delle metriche */
 html,body,button,input,textarea,select,[data-testid="stMetric"],[data-testid="stMetric"] *{font-family:"Aptos Display","Aptos","Segoe UI",Arial,sans-serif!important}
+[data-testid="stMain"] *,[data-testid="stSidebar"] *,[data-testid="stMetric"] *,[data-testid="stDataFrame"] *{font-family:"Aptos Display","Aptos","Segoe UI",Arial,sans-serif!important}
 [data-testid="stMetricDelta"],[data-testid="stMetricDelta"] *{color:#ffffff!important}
+[data-testid="stMetricDelta"]{background:#2c2925!important;border-radius:999px!important;padding:2px 8px!important;width:max-content!important}
+[data-testid="stMetricDelta"] p,[data-testid="stMetricDelta"] span,[data-testid="stMetricDelta"] svg,[data-testid="stMetricDelta"] div{color:#ffffff!important;fill:#ffffff!important;-webkit-text-fill-color:#ffffff!important;opacity:1!important}
 .stApp{background:#f7f7f7;color:#202124}.block-container{padding-top:3.6rem;max-width:1500px}
 [data-testid="stHeader"]{background:#087dac}
 [data-testid="stSidebar"]{background:#ffffff!important;border-right:1px solid #e5e7eb}
