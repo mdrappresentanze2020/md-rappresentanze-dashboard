@@ -15,6 +15,9 @@ from sqlalchemy import text
 st.set_page_config(page_title="MD Rappresentanze | Clienti", page_icon="📊", layout="wide")
 st.markdown("""<style>
 html,body,[class*="css"],.stApp,.stApp *{font-family:"Aptos Display","Aptos","Segoe UI",Arial,sans-serif!important}
+/* Uniforma tutto il testo della UI su Aptos Display e rende leggibili i delta delle metriche */
+html,body,button,input,textarea,select,[data-testid="stMetric"],[data-testid="stMetric"] *{font-family:"Aptos Display","Aptos","Segoe UI",Arial,sans-serif!important}
+[data-testid="stMetricDelta"],[data-testid="stMetricDelta"] *{color:#ffffff!important}
 .stApp{background:#f7f7f7;color:#202124}.block-container{padding-top:3.6rem;max-width:1500px}
 [data-testid="stHeader"]{background:#087dac}
 [data-testid="stSidebar"]{background:#ffffff!important;border-right:1px solid #e5e7eb}
@@ -117,9 +120,13 @@ def authenticate(username, password):
 
 def db_connection(): return st.connection("postgresql", type="sql")
 def ensure_table():
-    with db_connection().session as session:
-        session.execute(text("""CREATE TABLE IF NOT EXISTS customer_exports(customer_code TEXT PRIMARY KEY,customer_name TEXT NOT NULL,filename TEXT NOT NULL,content BYTEA NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
-        session.commit()
+    # Neon può chiudere una connessione rimasta inattiva. Al primo accesso
+    # azzeriamo la connessione non valida e ripetiamo l'operazione una volta.
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS customer_exports(customer_code TEXT PRIMARY KEY,customer_name TEXT NOT NULL,filename TEXT NOT NULL,content BYTEA NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+            session.commit()
+    return run_db_with_retry(operation)
 def ensure_targets_table():
     with db_connection().session as session:
         session.execute(text("""CREATE TABLE IF NOT EXISTS customer_targets(customer_code TEXT PRIMARY KEY,super_pre_split NUMERIC NOT NULL DEFAULT 0,super_pre_aqua NUMERIC NOT NULL DEFAULT 0,target_annuale_hvac NUMERIC NOT NULL DEFAULT 0,target_q1_hvac NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
@@ -199,17 +206,24 @@ def pdf_status():
         return session.execute(text("SELECT customer_code,order_number,filename,updated_at FROM order_pdfs ORDER BY customer_code,order_number")).mappings().all()
 def save_file(code, name, filename, content):
     ensure_table()
-    with db_connection().session as session:
-        session.execute(text("""INSERT INTO customer_exports(customer_code,customer_name,filename,content,updated_at) VALUES(:code,:name,:filename,:content,CURRENT_TIMESTAMP) ON CONFLICT(customer_code) DO UPDATE SET customer_name=:name,filename=:filename,content=:content,updated_at=CURRENT_TIMESTAMP"""), {"code":code,"name":name,"filename":filename,"content":content})
-        session.commit()
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""INSERT INTO customer_exports(customer_code,customer_name,filename,content,updated_at) VALUES(:code,:name,:filename,:content,CURRENT_TIMESTAMP) ON CONFLICT(customer_code) DO UPDATE SET customer_name=:name,filename=:filename,content=:content,updated_at=CURRENT_TIMESTAMP"""), {"code":code,"name":name,"filename":filename,"content":content})
+            session.commit()
+    return run_db_with_retry(operation)
 def load_file(code):
     ensure_table()
-    with db_connection().session as session:
-        return session.execute(text("SELECT customer_name,filename,content,updated_at FROM customer_exports WHERE customer_code=:code"), {"code":code}).mappings().first()
+    def operation(connection):
+        with connection.session as session:
+            return session.execute(text("SELECT customer_name,filename,content,updated_at FROM customer_exports WHERE customer_code=:code"), {"code":code}).mappings().first()
+    return run_db_with_retry(operation)
 def dataset_status():
     ensure_table()
-    with db_connection().session as session:
-        return {r["customer_code"]:r for r in session.execute(text("SELECT customer_code,customer_name,filename,updated_at FROM customer_exports")).mappings().all()}
+    def operation(connection):
+        with connection.session as session:
+            rows = session.execute(text("SELECT customer_code,customer_name,filename,updated_at FROM customer_exports")).mappings().all()
+            return {r["customer_code"]:r for r in rows}
+    return run_db_with_retry(operation)
 
 def run_db_with_retry(operation):
     connection = db_connection()
