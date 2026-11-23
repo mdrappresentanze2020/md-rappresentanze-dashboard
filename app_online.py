@@ -331,33 +331,71 @@ def parse_product_turnover_excel(file_obj):
         if match: detected=match.group(0); break
     return out,detected,sheet
 
+PRODUCT_FAMILY_FILTERS = [
+    "EDGE",
+    "EDGE R-290",
+    "AQUA",
+    "SPLIT",
+    "MONOSPLIT",
+    "MULTISPLIT",
+    "LIGHT COMMERCIAL SPLIT DX",
+    "IDU SPLIT DX",
+]
+
+def filter_product_families(data):
+    out=data.copy()
+    cols=[c for c in ["Famiglia Prodotto","Serie"] if c in out.columns]
+    if not cols: return out.iloc[0:0].copy()
+    text=out[cols].fillna("").astype(str).agg(" | ".join,axis=1).str.upper().str.replace("–","-",regex=False).str.replace("—","-",regex=False)
+    # Specific filters first; generic SPLIT is intentionally limited so it does not swallow unrelated families.
+    exact_patterns=[
+        r"\bEDGE\b(?!\s*R[- ]?290)",
+        r"EDGE\s*R[- ]?290",
+        r"\bAQUA\b",
+        r"\bMONO\s*SPLIT\b|\bMONOSPLIT\b",
+        r"\bMULTI\s*SPLIT\b|\bMULTISPLIT\b",
+        r"LIGHT\s+COMMERCIAL\s+SPLIT\s+DX",
+        r"IDU\s+SPLIT\s+DX",
+        r"(^|[ |_-])SPLIT($|[ |_-])",
+    ]
+    mask=pd.Series(False,index=out.index)
+    for pat in exact_patterns: mask=mask|text.str.contains(pat,regex=True,na=False)
+    return out[mask].copy().reset_index(drop=True)
+
 def product_turnover_page(user):
     st.title("Fatturato Prodotti (quantità)")
     is_admin=user.get("role")=="admin"
     if is_admin:
         labels={f"{info['name']} · {code}":code for code,info in CLIENTS.items()}
         status=product_turnover_status()
-        uploaded=st.file_uploader("Carica Excel Fatturato Prodotti",type=["xlsx"],key="product_turnover_upload")
-        chosen_code=None
-        parsed_upload=None
-        if uploaded is not None:
-            try:
-                parsed_upload,detected,sheet=parse_product_turnover_excel(uploaded)
-                default_code=detected if detected in CLIENTS else next(iter(CLIENTS))
-                options=list(labels.keys()); default_label=next((k for k,v in labels.items() if v==default_code),options[0])
-                selected_label=st.selectbox("Cliente destinatario",options,index=options.index(default_label),key="product_turnover_client")
-                chosen_code=labels[selected_label]
-                c1,c2,c3=st.columns(3)
-                c1.metric("Righe prodotto",len(parsed_upload))
-                c2.metric("Fatturato file",euro(parsed_upload["Fatturato"].sum()))
-                c3.metric("Quantità file",f"{parsed_upload['Quantità'].sum():,.0f}".replace(",","."))
-                st.dataframe(parsed_upload.head(50),use_container_width=True,hide_index=True)
-                if st.button("Pubblica Fatturato Prodotti",type="primary",use_container_width=True):
-                    save_product_turnover_file(chosen_code,uploaded.name,uploaded.getvalue())
-                    st.success(f"Dati pubblicati per {CLIENTS[chosen_code]['name']}.")
-                    st.rerun()
-            except Exception as exc:
-                st.error(f"File non valido: {exc}")
+        uploads=st.file_uploader("Carica Excel Fatturato Prodotti",type=["xlsx"],accept_multiple_files=True,key="product_turnover_upload")
+        valid_uploads=[]
+        if uploads:
+            preview_rows=[]
+            for uploaded in uploads:
+                try:
+                    parsed_upload,detected,sheet=parse_product_turnover_excel(uploaded)
+                    parsed_upload=filter_product_families(parsed_upload)
+                    if parsed_upload.empty: raise ValueError("nessuna delle famiglie prodotto richieste è presente nel file")
+                    if not detected or detected not in CLIENTS:
+                        raise ValueError("codice cliente non riconosciuto nel file")
+                    valid_uploads.append((uploaded,detected,parsed_upload))
+                    preview_rows.append({"File":uploaded.name,"Cliente":CLIENTS[detected]["name"],"Codice":detected,"Righe":len(parsed_upload),"Fatturato":euro(parsed_upload["Fatturato"].sum()),"Quantità":f"{parsed_upload['Quantità'].sum():,.0f}".replace(",",".")})
+                except Exception as exc:
+                    preview_rows.append({"File":uploaded.name,"Cliente":"-","Codice":"-","Righe":"-","Fatturato":"-","Quantità":f"ERRORE: {exc}"})
+            st.dataframe(pd.DataFrame(preview_rows),use_container_width=True,hide_index=True)
+            if valid_uploads and st.button("Pubblica tutti i file Fatturato Prodotti",type="primary",use_container_width=True):
+                saved_count=0; errors=[]
+                for uploaded,detected,parsed_upload in valid_uploads:
+                    try:
+                        save_product_turnover_file(detected,uploaded.name,uploaded.getvalue())
+                        saved_count+=1
+                    except Exception as exc:
+                        errors.append(f"{uploaded.name}: {exc}")
+                if saved_count: st.success(f"Pubblicati {saved_count} file cliente su {len(uploads)} caricati.")
+                if errors:
+                    for err in errors: st.error(err)
+                if not errors: st.rerun()
         st.subheader("Dati pubblicati")
         status_rows=[]
         for code,info in CLIENTS.items():
@@ -377,6 +415,8 @@ def product_turnover_page(user):
         return
     try:
         data,detected,sheet=parse_product_turnover_excel(io.BytesIO(bytes(record["content"])))
+        data=filter_product_families(data)
+        if data.empty: raise ValueError("nessuna delle famiglie prodotto richieste è presente nel file")
     except Exception as exc:
         st.error(f"Errore nella lettura del file pubblicato: {exc}"); return
     st.caption(f"Ultimo aggiornamento: {record['updated_at']} · File: {record['filename']}")
