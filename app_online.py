@@ -239,6 +239,168 @@ def run_db_with_retry(operation):
             pass
         return operation(db_connection())
 
+
+def ensure_product_turnover_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS product_turnover_exports(customer_code TEXT PRIMARY KEY,filename TEXT NOT NULL,content BYTEA NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def save_product_turnover_file(customer_code, filename, content):
+    ensure_product_turnover_table()
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""INSERT INTO product_turnover_exports(customer_code,filename,content,updated_at) VALUES(:code,:filename,:content,CURRENT_TIMESTAMP) ON CONFLICT(customer_code) DO UPDATE SET filename=:filename,content=:content,updated_at=CURRENT_TIMESTAMP"""), {"code":customer_code,"filename":filename,"content":content})
+            session.commit()
+    return run_db_with_retry(operation)
+
+def load_product_turnover_file(customer_code):
+    ensure_product_turnover_table()
+    def operation(connection):
+        with connection.session as session:
+            return session.execute(text("SELECT filename,content,updated_at FROM product_turnover_exports WHERE customer_code=:code"), {"code":customer_code}).mappings().first()
+    return run_db_with_retry(operation)
+
+def product_turnover_status():
+    ensure_product_turnover_table()
+    def operation(connection):
+        with connection.session as session:
+            return {r["customer_code"]:r for r in session.execute(text("SELECT customer_code,filename,updated_at FROM product_turnover_exports")).mappings().all()}
+    return run_db_with_retry(operation)
+
+def _norm_header(value):
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+def parse_product_turnover_excel(file_obj):
+    content=file_obj.getvalue() if hasattr(file_obj,"getvalue") else file_obj.read()
+    book=pd.ExcelFile(io.BytesIO(content),engine="openpyxl")
+    best=None
+    required_groups={
+        "catalogo":["market catalog","catalogo","catalog"],
+        "famiglia":["famiglia prodotto","famiglia"],
+        "serie":["serie"],
+        "grandezza":["grandezza","taglia","size"],
+        "fatturato":["fatturato ac","fatturato"],
+        "quantita":["quantità ac (no-acc)","quantita ac (no-acc)","quantità ac","quantita ac","quantità","quantita"],
+    }
+    for sheet in book.sheet_names:
+        preview=pd.read_excel(io.BytesIO(content),sheet_name=sheet,header=None,nrows=50,engine="openpyxl")
+        for idx,row in preview.iterrows():
+            values=[_norm_header(v) for v in row.tolist()]
+            score=sum(any(alias in values for alias in aliases) for aliases in required_groups.values())
+            if best is None or score>best[0]: best=(score,sheet,idx,values)
+    if not best or best[0]<4:
+        raise ValueError("Intestazioni del file prodotti non riconosciute. Servono almeno Catalogo, Famiglia, Fatturato e Quantità.")
+    _,sheet,header_row,_=best
+    df=pd.read_excel(io.BytesIO(content),sheet_name=sheet,header=header_row,engine="openpyxl")
+    original=list(df.columns)
+    normalized={c:_norm_header(c) for c in original}
+    def find_col(aliases,required=False):
+        for c,n in normalized.items():
+            if n in aliases or any(a in n for a in aliases): return c
+        if required: raise ValueError("Colonna mancante: "+aliases[0])
+        return None
+    columns={k:find_col(v, k in ("catalogo","famiglia","fatturato","quantita")) for k,v in required_groups.items()}
+    out=pd.DataFrame()
+    for key,label in [("catalogo","Catalogo"),("famiglia","Famiglia Prodotto"),("serie","Serie"),("grandezza","Grandezza")]:
+        out[label]=df[columns[key]] if columns[key] is not None else ""
+    out["Fatturato"]=pd.to_numeric(df[columns["fatturato"]],errors="coerce").fillna(0.0)
+    out["Quantità"]=pd.to_numeric(df[columns["quantita"]],errors="coerce").fillna(0.0)
+    dims=["Catalogo","Famiglia Prodotto","Serie","Grandezza"]
+    out[dims]=out[dims].replace({"nan":"", "None":""})
+    out[dims]=out[dims].ffill()
+    for c in dims: out[c]=out[c].astype(str).str.strip()
+    # Elimina righe vuote e totali generali; conserva il dettaglio prodotto più profondo disponibile.
+    total_words={"total","totale","grand total","totale complessivo"}
+    mask=(out["Fatturato"].abs()>0)|(out["Quantità"].abs()>0)
+    out=out[mask].copy()
+    for c in dims:
+        out=out[~out[c].str.casefold().isin(total_words)]
+    # Se il report contiene il dettaglio Grandezza, usa le righe di dettaglio per evitare doppi conteggi dei subtotali.
+    if out["Grandezza"].ne("").any():
+        detail=out[out["Grandezza"].ne("")].copy()
+        if not detail.empty: out=detail
+    out=out.reset_index(drop=True)
+    if out.empty: raise ValueError("Il file non contiene righe prodotto valorizzate.")
+    # Individuazione codice cliente in tutte le celle del file.
+    detected=None
+    raw=pd.read_excel(io.BytesIO(content),sheet_name=sheet,header=None,engine="openpyxl",dtype=str)
+    for value in raw.fillna("").to_numpy().ravel():
+        match=re.search(r"M\d{7}",str(value).upper())
+        if match: detected=match.group(0); break
+    return out,detected,sheet
+
+def product_turnover_page(user):
+    st.title("Fatturato Prodotti (quantità)")
+    is_admin=user.get("role")=="admin"
+    if is_admin:
+        labels={f"{info['name']} · {code}":code for code,info in CLIENTS.items()}
+        status=product_turnover_status()
+        uploaded=st.file_uploader("Carica Excel Fatturato Prodotti",type=["xlsx"],key="product_turnover_upload")
+        chosen_code=None
+        parsed_upload=None
+        if uploaded is not None:
+            try:
+                parsed_upload,detected,sheet=parse_product_turnover_excel(uploaded)
+                default_code=detected if detected in CLIENTS else next(iter(CLIENTS))
+                options=list(labels.keys()); default_label=next((k for k,v in labels.items() if v==default_code),options[0])
+                selected_label=st.selectbox("Cliente destinatario",options,index=options.index(default_label),key="product_turnover_client")
+                chosen_code=labels[selected_label]
+                c1,c2,c3=st.columns(3)
+                c1.metric("Righe prodotto",len(parsed_upload))
+                c2.metric("Fatturato file",euro(parsed_upload["Fatturato"].sum()))
+                c3.metric("Quantità file",f"{parsed_upload['Quantità'].sum():,.0f}".replace(",","."))
+                st.dataframe(parsed_upload.head(50),use_container_width=True,hide_index=True)
+                if st.button("Pubblica Fatturato Prodotti",type="primary",use_container_width=True):
+                    save_product_turnover_file(chosen_code,uploaded.name,uploaded.getvalue())
+                    st.success(f"Dati pubblicati per {CLIENTS[chosen_code]['name']}.")
+                    st.rerun()
+            except Exception as exc:
+                st.error(f"File non valido: {exc}")
+        st.subheader("Dati pubblicati")
+        status_rows=[]
+        for code,info in CLIENTS.items():
+            rec=status.get(code)
+            status_rows.append({"Cliente":info["name"],"Codice":code,"File":rec["filename"] if rec else "Non caricato","Ultimo aggiornamento":str(rec["updated_at"]) if rec else "-"})
+        st.dataframe(pd.DataFrame(status_rows),use_container_width=True,hide_index=True)
+        selected_view=st.selectbox("Anteprima cliente",list(labels.keys()),key="product_turnover_preview")
+        code=labels[selected_view]
+    else:
+        code=str(user.get("customer_code","")).strip().upper()
+        if not code or code not in CLIENTS:
+            st.error("Cliente non associato all'account."); return
+        st.caption(CLIENTS[code]["name"])
+    record=load_product_turnover_file(code)
+    if not record:
+        st.info("Dati Fatturato Prodotti non ancora pubblicati per questo cliente.")
+        return
+    try:
+        data,detected,sheet=parse_product_turnover_excel(io.BytesIO(bytes(record["content"])))
+    except Exception as exc:
+        st.error(f"Errore nella lettura del file pubblicato: {exc}"); return
+    st.caption(f"Ultimo aggiornamento: {record['updated_at']} · File: {record['filename']}")
+    k1,k2,k3=st.columns(3)
+    k1.metric("Fatturato prodotti",euro(data["Fatturato"].sum()))
+    k2.metric("Quantità totale",f"{data['Quantità'].sum():,.0f}".replace(",","."))
+    k3.metric("Famiglie prodotto",data["Famiglia Prodotto"].nunique())
+    catalogs=sorted(data["Catalogo"].dropna().unique().tolist())
+    selected_catalog=st.selectbox("Catalogo",["Tutti"]+catalogs,key=f"pt_catalog_{code}")
+    filtered=data if selected_catalog=="Tutti" else data[data["Catalogo"]==selected_catalog]
+    fam=filtered.groupby(["Catalogo","Famiglia Prodotto"],as_index=False).agg(Fatturato=("Fatturato","sum"),Quantità=("Quantità","sum"))
+    fam=fam.sort_values("Fatturato",ascending=False)
+    fam_display=fam.copy(); fam_display["Fatturato"]=fam_display["Fatturato"].map(euro); fam_display["Quantità"]=fam_display["Quantità"].map(lambda x:f"{x:,.0f}".replace(",","."))
+    st.subheader("Riepilogo per famiglia prodotto")
+    st.dataframe(fam_display,use_container_width=True,hide_index=True)
+    st.subheader("Dettaglio prodotti")
+    family_options=sorted(filtered["Famiglia Prodotto"].dropna().unique().tolist())
+    selected_family=st.selectbox("Famiglia Prodotto",["Tutte"]+family_options,key=f"pt_family_{code}")
+    detail=filtered if selected_family=="Tutte" else filtered[filtered["Famiglia Prodotto"]==selected_family]
+    detail=detail.groupby(["Catalogo","Famiglia Prodotto","Serie","Grandezza"],as_index=False).agg(Fatturato=("Fatturato","sum"),Quantità=("Quantità","sum"))
+    detail=detail.sort_values(["Famiglia Prodotto","Serie","Grandezza"])
+    detail_display=detail.copy(); detail_display["Fatturato"]=detail_display["Fatturato"].map(euro); detail_display["Quantità"]=detail_display["Quantità"].map(lambda x:f"{x:,.0f}".replace(",","."))
+    st.dataframe(detail_display,use_container_width=True,hide_index=True)
+
 def ensure_addendum_table():
     def operation(connection):
         with connection.session as session:
@@ -1821,9 +1983,10 @@ with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
     if st.button("Esci"): st.session_state.user=None;st.rerun()
-    pages=["Dashboard","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
+    pages=["Dashboard","Fatturato Prodotti (quantità)","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
+if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
