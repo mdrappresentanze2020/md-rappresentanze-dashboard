@@ -10,6 +10,7 @@ import urllib.request
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 from sqlalchemy import text
 
 st.set_page_config(page_title="MD Rappresentanze | Clienti", page_icon="📊", layout="wide")
@@ -998,7 +999,19 @@ def document_archive_page(user,document_type):
     st.download_button("Scarica PDF",data=pdf_bytes,file_name=row["filename"],mime="application/pdf",type="primary",use_container_width=True,key=f"archive_download_{document_type}_{code}_{selected_label}")
     st.caption(f"Origine: {row.get('source','Google Drive')}")
     st.markdown("**Anteprima documento**")
-    st.markdown(f'<iframe src="data:application/pdf;base64,{pdf_b64}#toolbar=1&navpanes=0" width="100%" height="820" style="border:1px solid #d7dde5;border-radius:8px;background:#fff"></iframe>',unsafe_allow_html=True)
+    preview_id=f"pdf_preview_{document_type}_{code}_{abs(hash(selected_label))}"
+    st.markdown(f'<embed id="{preview_id}" type="application/pdf" width="0" height="0">',unsafe_allow_html=True)
+    components.html(f"""<script>
+    (() => {{
+      const raw=atob({json.dumps(pdf_b64)});
+      const bytes=new Uint8Array(raw.length);
+      for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
+      const blob=new Blob([bytes],{{type:'application/pdf'}});
+      const url=URL.createObjectURL(blob);
+      const target=window.parent.document.getElementById({json.dumps(preview_id)});
+      if(target) {{ target.src=url+'#view=FitH&toolbar=1&navpanes=0'; target.width='100%'; target.height='820'; target.style.border='1px solid #d7dde5'; target.style.borderRadius='8px'; target.style.background='#fff'; }}
+    }})();
+    </script>""",height=0)
 
 def order_pdfs_page():
     st.title("Gestione PDF conferme Clivet")
