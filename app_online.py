@@ -2434,7 +2434,12 @@ def import_order_price_list(catalog,uploaded_file):
             session.execute(text('DELETE FROM order_price_lists WHERE catalog=:catalog'),{'catalog':catalog})
             for code,model,description,price in rows:
                 session.execute(text("""INSERT INTO order_price_lists(catalog,product_code,model,description,list_price,updated_at)
-                    VALUES(:catalog,:code,:model,:description,:price,CURRENT_TIMESTAMP)"""),
+                    VALUES(:catalog,:code,:model,:description,:price,CURRENT_TIMESTAMP)
+                    ON CONFLICT(catalog,product_code) DO UPDATE SET
+                        model=EXCLUDED.model,
+                        description=EXCLUDED.description,
+                        list_price=EXCLUDED.list_price,
+                        updated_at=CURRENT_TIMESTAMP"""),
                     {'catalog':catalog,'code':code,'model':model,'description':description,'price':price})
             session.commit()
     run_db_with_retry(operation);return len(rows)
