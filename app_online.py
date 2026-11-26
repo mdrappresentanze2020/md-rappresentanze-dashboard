@@ -2543,6 +2543,11 @@ def send_order_page(user):
         return
     st.title('Invia Ordine')
     st.caption('Carica l’ordine cliente in PDF. Il documento resta associato al tuo account.')
+    order_notice=st.session_state.pop('order_notification_notice',None)
+    if order_notice:
+        notice_type,notice_text=order_notice
+        if notice_type=='success': st.success(notice_text)
+        else: st.warning(notice_text)
     with st.form('customer_order_upload'):
         catalog=st.radio('Catalogo di riferimento',['HOME / SPLIT','VRF','APPLIED'],horizontal=True)
         reference=st.text_input('Riferimento ordine cliente')
@@ -2555,10 +2560,9 @@ def send_order_page(user):
             save_customer_pdf_order(code,reference.strip(),notes.strip(),catalog,uploaded.name,uploaded.getvalue())
             sent,email_error=send_new_order_email(code,catalog,reference.strip(),notes.strip(),uploaded.name)
             if sent:
-                st.success('Ordine caricato correttamente. Notifica email inviata.')
+                st.session_state['order_notification_notice']=('success','Ordine caricato correttamente. Notifica email inviata a mdrappresentanze2020@gmail.com.')
             else:
-                st.warning(f'Ordine caricato correttamente, ma la notifica email non è partita: {email_error}')
-            time.sleep(2)
+                st.session_state['order_notification_notice']=('warning',f'Ordine caricato correttamente, ma la notifica email non è partita: {email_error}')
             st.rerun()
     orders=load_customer_pdf_orders(code)
     if orders:
