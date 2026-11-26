@@ -983,8 +983,14 @@ def document_archive_page(user,document_type):
         raw=row.get("created_at") or "";date_label="Data non disponibile"
         try: date_label=pd.to_datetime(raw,utc=True).tz_convert("Europe/Rome").strftime("%d/%m/%Y")
         except Exception: pass
-        if document_type=="conferma": base=row.get("order_number") or re.sub(r"\.pdf$","",row["filename"],flags=re.I)
-        else: base=re.sub(r"\.pdf$","",row["filename"],flags=re.I)
+        if document_type=="conferma":
+            base=row.get("order_number") or re.sub(r"\.pdf$","",row["filename"],flags=re.I)
+        else:
+            ordine=row.get("order_number") or ""
+            if not ordine:
+                match=re.search(r"SO[0-9]+",str(row.get("filename","")).upper())
+                ordine=match.group(0) if match else re.sub(r"\.pdf$","",row["filename"],flags=re.I)
+            base=f"DDT_{ordine}" if not str(ordine).upper().startswith("DDT_") else str(ordine)
         label=f"{base} · {date_label}"
         if label in options: label=f"{label} · {index+1}"
         options[label]=row
@@ -998,23 +1004,6 @@ def document_archive_page(user,document_type):
     pdf_b64=base64.b64encode(pdf_bytes).decode("ascii")
     st.download_button("Scarica PDF",data=pdf_bytes,file_name=row["filename"],mime="application/pdf",type="primary",use_container_width=True,key=f"archive_download_{document_type}_{code}_{selected_label}")
     st.caption(f"Origine: {row.get('source','Google Drive')}")
-    st.markdown("**Anteprima documento**")
-    components.html(f"""
-    <div style="width:100%;height:820px;border:1px solid #d7dde5;border-radius:8px;overflow:hidden;background:#fff">
-      <embed id="pdfViewer" type="application/pdf" width="100%" height="100%">
-    </div>
-    <script>
-    (() => {{
-      const raw=atob({json.dumps(pdf_b64)});
-      const bytes=new Uint8Array(raw.length);
-      for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
-      const blob=new Blob([bytes],{{type:'application/pdf'}});
-      const url=URL.createObjectURL(blob);
-      document.getElementById('pdfViewer').src=url+'#view=FitH&toolbar=1&navpanes=0';
-      window.addEventListener('beforeunload',()=>URL.revokeObjectURL(url),{{once:true}});
-    }})();
-    </script>
-    """,height=840,scrolling=False)
 
 def order_pdfs_page():
     st.title("Gestione PDF conferme Clivet")
