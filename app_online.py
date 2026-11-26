@@ -2378,6 +2378,8 @@ user=st.session_state.user
 with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
+    if st.button("Aggiorna", type="primary", use_container_width=True, key="refresh_dashboard"):
+        st.rerun()
     if st.button("Esci"):
         delete_browser_cookie(SESSION_COOKIE_NAME)
         st.session_state.user=None
