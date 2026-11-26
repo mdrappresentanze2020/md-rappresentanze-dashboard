@@ -926,6 +926,109 @@ def admin_dashboard():
             dashboard(data, found_code, found_name)
             st.caption(f"Ultimo aggiornamento: {updated_at}")
 
+
+# Archivio documentale indipendente dagli aggiornamenti Excel/CSV.
+def ensure_customer_documents_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS customer_documents(
+                id BIGSERIAL PRIMARY KEY,
+                customer_code TEXT NOT NULL,
+                document_type TEXT NOT NULL,
+                order_number TEXT NOT NULL DEFAULT '',
+                filename TEXT NOT NULL,
+                content BYTEA NOT NULL,
+                source TEXT NOT NULL DEFAULT 'Archivio',
+                received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(customer_code,document_type,order_number,filename)
+            )"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def save_customer_document(customer_code, document_type, order_number, filename, content, source="Archivio"):
+    ensure_customer_documents_table()
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""INSERT INTO customer_documents(customer_code,document_type,order_number,filename,content,source,received_at,updated_at)
+            VALUES(:code,:dtype,:order_number,:filename,:content,:source,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+            ON CONFLICT(customer_code,document_type,order_number,filename) DO UPDATE SET content=:content,source=:source,updated_at=CURRENT_TIMESTAMP"""), {
+                "code":str(customer_code).strip().upper(),"dtype":str(document_type).strip().lower(),
+                "order_number":str(order_number or "").strip().upper(),"filename":filename,"content":content,"source":source})
+            session.commit()
+    return run_db_with_retry(operation)
+
+def load_customer_documents(customer_code, document_type):
+    ensure_customer_documents_table()
+    def operation(connection):
+        with connection.session as session:
+            return session.execute(text("""SELECT id,order_number,filename,content,source,received_at,updated_at FROM customer_documents
+                WHERE customer_code=:code AND document_type=:dtype
+                ORDER BY received_at DESC,updated_at DESC,order_number DESC,filename"""), {
+                "code":str(customer_code).strip().upper(),"dtype":str(document_type).strip().lower()}).mappings().all()
+    return run_db_with_retry(operation)
+
+def known_customer_orders(customer_code):
+    record=load_file(customer_code)
+    if not record: return []
+    try:
+        data,_,_=read_export(io.BytesIO(bytes(record["content"])))
+        return sorted(data[data["Livello"]=="order"]["Numero Ordine"].dropna().astype(str).unique().tolist(),reverse=True)
+    except Exception: return []
+
+def sync_google_documents(customer_code, document_type):
+    saved=0;errors=[]
+    for order_number in known_customer_orders(customer_code):
+        if document_type=="conferma":
+            document,error=load_google_order_pdf(customer_code,order_number);documents=[document] if document else []
+        else:
+            documents,error=load_google_ddt(customer_code,order_number)
+        if error: errors.append(f"{order_number}: {error}");continue
+        for document in documents or []:
+            save_customer_document(customer_code,document_type,order_number,document["filename"],document["content"],document.get("source","Google Drive"));saved+=1
+    return saved,errors
+
+def document_archive_page(user, document_type):
+    is_admin=user.get("role")=="admin"
+    title="Conferme Ordine" if document_type=="conferma" else "DDT"
+    st.title(title)
+    st.caption("Archivio PDF permanente e indipendente dagli aggiornamenti dei dati commerciali.")
+    if is_admin:
+        labels={f"{info['name']} · {code}":code for code,info in CLIENTS.items()}
+        selected=st.selectbox("Cliente",list(labels.keys()),key=f"archive_client_{document_type}");code=labels[selected]
+    else:
+        code=str(user.get("customer_code") or user.get("code") or "").strip().upper()
+        if not code or code not in CLIENTS: st.error("Cliente non associato all'account.");return
+        st.caption(CLIENTS[code]["name"])
+    if is_admin:
+        with st.expander(f"Carica {title}",expanded=False):
+            order_number=st.text_input("Numero ordine",key=f"archive_order_{document_type}_{code}").strip().upper()
+            uploads=st.file_uploader("Seleziona uno o più PDF",type=["pdf"],accept_multiple_files=True,key=f"archive_upload_{document_type}_{code}")
+            if st.button("Salva documenti",type="primary",disabled=not uploads,key=f"archive_save_{document_type}_{code}"):
+                for upload in uploads: save_customer_document(code,document_type,order_number,upload.name,upload.getvalue(),"Caricamento Admin")
+                st.success(f"Salvati {len(uploads)} documenti nell'archivio {title}.");st.rerun()
+        if st.button("Aggiorna archivio da Google Drive",key=f"archive_sync_{document_type}_{code}"):
+            with st.spinner("Ricerca dei nuovi documenti in corso..."): saved,errors=sync_google_documents(code,document_type)
+            if saved: st.success(f"Acquisiti o aggiornati {saved} documenti.")
+            else: st.info("Nessun nuovo documento trovato tra gli ordini attualmente disponibili.")
+            if errors: st.warning(f"Alcuni controlli non sono riusciti ({len(errors)}).")
+            st.rerun()
+    documents=load_customer_documents(code,document_type)
+    if not documents: st.info(f"Nessun documento presente nell'archivio {title}.");return
+    options={}
+    for row in documents:
+        date=row["received_at"].strftime("%d/%m/%Y") if row.get("received_at") else "Data non disponibile"
+        order=row.get("order_number") or "Senza numero ordine";label=f"{order} · {row['filename']} · {date}"
+        if label in options: label=f"{label} · ID {row['id']}"
+        options[label]=row
+    selected_label=st.selectbox(f"Seleziona {title.lower()}",list(options.keys()),key=f"archive_selector_{document_type}_{code}")
+    row=options[selected_label];pdf_bytes=bytes(row["content"]);pdf_b64=base64.b64encode(pdf_bytes).decode("ascii")
+    c1,c2=st.columns([1,1])
+    with c1: st.download_button("Scarica PDF",data=pdf_bytes,file_name=row["filename"],mime="application/pdf",type="primary",use_container_width=True,key=f"archive_download_{document_type}_{row['id']}")
+    with c2: st.markdown(f'<a href="data:application/pdf;base64,{pdf_b64}" target="_blank" style="display:block;text-align:center;padding:.55rem 1rem;border:1px solid #087dac;border-radius:.5rem;text-decoration:none;font-weight:700;color:#087dac;background:#fff">Apri / Stampa PDF</a>',unsafe_allow_html=True)
+    st.caption(f"Ordine: {row.get('order_number') or 'non indicato'} · Origine: {row.get('source') or 'Archivio'}")
+    st.markdown(f'<iframe src="data:application/pdf;base64,{pdf_b64}" width="100%" height="760" style="border:1px solid #d7dde5;border-radius:8px;background:#fff"></iframe>',unsafe_allow_html=True)
+
 def order_pdfs_page():
     st.title("Gestione PDF conferme Clivet")
     st.caption("Associa ogni PDF Clivet al cliente e al numero ordine presente nella dashboard.")
@@ -2023,10 +2126,12 @@ with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
     if st.button("Esci"): st.session_state.user=None;st.rerun()
-    pages=["Dashboard","Fatturato Prodotti (quantità)","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
+    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
+if page=="Conferme Ordine": document_archive_page(user,"conferma");st.stop()
+if page=="DDT": document_archive_page(user,"ddt");st.stop()
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
@@ -2048,4 +2153,3 @@ try:
     if found_code!=code: raise ValueError("Il dataset non corrisponde all'utente collegato.")
     dashboard(data,found_code,name);st.caption(f"Ultimo aggiornamento: {record['updated_at']}")
 except Exception as exc: st.error(f"Errore nella lettura dei dati: {exc}")
-
