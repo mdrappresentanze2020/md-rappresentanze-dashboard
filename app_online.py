@@ -2516,14 +2516,28 @@ def send_new_order_email(customer_code,catalog,reference,notes,filename):
         f"Note: {notes or 'Nessuna'}\n\n"
         f"Accedi alla dashboard per visualizzare e scaricare il PDF."
     )
+    errors=[]
+    context=ssl.create_default_context()
+    # Primo tentativo: STARTTLS sulla porta 587.
     try:
-        context=ssl.create_default_context()
+        with smtplib.SMTP("smtp.gmail.com",587,timeout=25) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            server.login(sender,app_password)
+            server.send_message(message)
+        return True,""
+    except Exception as exc:
+        errors.append(f"porta 587: {type(exc).__name__}: {exc}")
+    # Secondo tentativo: SSL implicito sulla porta 465.
+    try:
         with smtplib.SMTP_SSL("smtp.gmail.com",465,context=context,timeout=25) as server:
             server.login(sender,app_password)
             server.send_message(message)
         return True,""
     except Exception as exc:
-        return False,str(exc)
+        errors.append(f"porta 465: {type(exc).__name__}: {exc}")
+    return False," | ".join(errors)
 
 def send_order_page(user):
     is_admin=user.get('role')=='admin'
