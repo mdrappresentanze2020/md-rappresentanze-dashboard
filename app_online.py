@@ -995,10 +995,10 @@ def document_archive_page(user,document_type):
         st.warning(pdf_error or "PDF non disponibile.")
         return
     pdf_b64=base64.b64encode(pdf_bytes).decode("ascii")
-    c1,c2=st.columns(2)
-    with c1: st.download_button("Scarica PDF",data=pdf_bytes,file_name=row["filename"],mime="application/pdf",type="primary",use_container_width=True,key=f"archive_download_{document_type}_{code}_{selected_label}")
-    with c2: st.markdown(f'<a href="data:application/pdf;base64,{pdf_b64}" target="_blank" style="display:block;text-align:center;padding:.55rem 1rem;border:1px solid #087dac;border-radius:.5rem;text-decoration:none;font-weight:700;color:#087dac;background:#fff">Apri / Stampa PDF</a>',unsafe_allow_html=True)
+    st.download_button("Scarica PDF",data=pdf_bytes,file_name=row["filename"],mime="application/pdf",type="primary",use_container_width=True,key=f"archive_download_{document_type}_{code}_{selected_label}")
     st.caption(f"Origine: {row.get('source','Google Drive')}")
+    st.markdown("**Anteprima documento**")
+    st.markdown(f'<iframe src="data:application/pdf;base64,{pdf_b64}#toolbar=1&navpanes=0" width="100%" height="820" style="border:1px solid #d7dde5;border-radius:8px;background:#fff"></iframe>',unsafe_allow_html=True)
 
 def order_pdfs_page():
     st.title("Gestione PDF conferme Clivet")
