@@ -11,6 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
+from pypdf import PdfReader
 from sqlalchemy import text
 
 st.set_page_config(page_title="MD Rappresentanze | Clienti", page_icon="📊", layout="wide")
@@ -964,6 +965,35 @@ def load_google_archive_pdf(customer_code, document_type, file_id):
         return base64.b64decode(payload["pdf"]),None
     except Exception as exc: return None,f"Collegamento Google PDF non disponibile: {exc}"
 
+def extract_pdf_text(pdf_bytes):
+    try:
+        reader=PdfReader(io.BytesIO(pdf_bytes))
+        pages=[]
+        for page in reader.pages:
+            text_value=(page.extract_text() or "").strip()
+            if text_value: pages.append(text_value)
+        text_value="\n\n".join(pages).strip()
+        return text_value,None
+    except Exception as exc:
+        return "",str(exc)
+
+def document_content_block(pdf_bytes,document_type):
+    extracted,error=extract_pdf_text(pdf_bytes)
+    title="Contenuto Conferma Ordine" if document_type=="conferma" else "Contenuto DDT"
+    st.subheader(title)
+    if error:
+        st.info("Non è stato possibile leggere automaticamente il contenuto di questo PDF. Il documento originale resta disponibile con Scarica PDF.")
+        return
+    if not extracted:
+        st.info("Questo PDF non contiene testo estraibile automaticamente. Il documento originale resta disponibile con Scarica PDF.")
+        return
+    lines=[re.sub(r"\s+"," ",line).strip() for line in extracted.splitlines()]
+    lines=[line for line in lines if line]
+    if not lines:
+        st.info("Nessun contenuto testuale leggibile trovato nel PDF.")
+        return
+    st.text_area("Testo del documento",value="\n".join(lines),height=500,disabled=True,key=f"doc_text_{document_type}_{hash(extracted)}")
+
 def document_archive_page(user,document_type):
     is_admin=user.get("role")=="admin";title="Conferme Ordine" if document_type=="conferma" else "DDT"
     st.title(title);st.caption("Documenti acquisiti automaticamente da Google Drive, ordinati dal più recente al meno recente.")
@@ -1004,6 +1034,7 @@ def document_archive_page(user,document_type):
     pdf_b64=base64.b64encode(pdf_bytes).decode("ascii")
     st.download_button("Scarica PDF",data=pdf_bytes,file_name=row["filename"],mime="application/pdf",type="primary",use_container_width=True,key=f"archive_download_{document_type}_{code}_{selected_label}")
     st.caption(f"Origine: {row.get('source','Google Drive')}")
+    document_content_block(pdf_bytes,document_type)
 
 def order_pdfs_page():
     st.title("Gestione PDF conferme Clivet")
