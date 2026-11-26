@@ -927,72 +927,33 @@ def admin_dashboard():
             st.caption(f"Ultimo aggiornamento: {updated_at}")
 
 
-# Archivio documentale indipendente dagli aggiornamenti Excel/CSV.
-def ensure_customer_documents_table():
-    def operation(connection):
-        with connection.session as session:
-            session.execute(text("""CREATE TABLE IF NOT EXISTS customer_documents(
-                id BIGSERIAL PRIMARY KEY,
-                customer_code TEXT NOT NULL,
-                document_type TEXT NOT NULL,
-                order_number TEXT NOT NULL DEFAULT '',
-                filename TEXT NOT NULL,
-                content BYTEA NOT NULL,
-                source TEXT NOT NULL DEFAULT 'Archivio',
-                received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(customer_code,document_type,order_number,filename)
-            )"""))
-            session.commit()
-    return run_db_with_retry(operation)
 
-def save_customer_document(customer_code, document_type, order_number, filename, content, source="Archivio"):
-    ensure_customer_documents_table()
-    def operation(connection):
-        with connection.session as session:
-            session.execute(text("""INSERT INTO customer_documents(customer_code,document_type,order_number,filename,content,source,received_at,updated_at)
-            VALUES(:code,:dtype,:order_number,:filename,:content,:source,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-            ON CONFLICT(customer_code,document_type,order_number,filename) DO UPDATE SET content=:content,source=:source,updated_at=CURRENT_TIMESTAMP"""), {
-                "code":str(customer_code).strip().upper(),"dtype":str(document_type).strip().lower(),
-                "order_number":str(order_number or "").strip().upper(),"filename":filename,"content":content,"source":source})
-            session.commit()
-    return run_db_with_retry(operation)
-
-def load_customer_documents(customer_code, document_type):
-    ensure_customer_documents_table()
-    def operation(connection):
-        with connection.session as session:
-            return session.execute(text("""SELECT id,order_number,filename,content,source,received_at,updated_at FROM customer_documents
-                WHERE customer_code=:code AND document_type=:dtype
-                ORDER BY received_at DESC,updated_at DESC,order_number DESC,filename"""), {
-                "code":str(customer_code).strip().upper(),"dtype":str(document_type).strip().lower()}).mappings().all()
-    return run_db_with_retry(operation)
-
-def known_customer_orders(customer_code):
-    record=load_file(customer_code)
-    if not record: return []
+def load_google_archive(customer_code, document_type):
+    config=st.secrets.get("google_pdf",{})
+    webapp_url=str(config.get("webapp_url","")).strip();token=str(config.get("token","")).strip()
+    if not webapp_url or not token: return [],"Configurazione Google PDF non disponibile."
+    params=urllib.parse.urlencode({"cliente":str(customer_code).strip().upper(),"tipo":str(document_type).strip().lower(),"elenco":"1","token":token})
+    url=webapp_url+("&" if "?" in webapp_url else "?")+params
     try:
-        data,_,_=read_export(io.BytesIO(bytes(record["content"])))
-        return sorted(data[data["Livello"]=="order"]["Numero Ordine"].dropna().astype(str).unique().tolist(),reverse=True)
-    except Exception: return []
+        request=urllib.request.Request(url,headers={"User-Agent":"MD-Rappresentanze-Dashboard/1.0"})
+        with urllib.request.urlopen(request,timeout=120) as response: payload=json.loads(response.read().decode("utf-8"))
+        if not payload.get("ok"): return [],payload.get("errore") or "Risposta Google non valida."
+        documents=[];seen=set()
+        for item in payload.get("files") or []:
+            if not item.get("pdf"): continue
+            order=str(item.get("ordine") or "").strip().upper()
+            filename=str(item.get("filename") or "documento.pdf").strip()
+            key=order if document_type=="conferma" and order else filename.casefold()
+            if key in seen: continue
+            seen.add(key)
+            documents.append({"order_number":order,"filename":filename,"content":base64.b64decode(item["pdf"]),"created_at":item.get("createdAt") or item.get("updatedAt") or "","source":"Google Drive"})
+        documents.sort(key=lambda x:(x["created_at"],x["filename"]),reverse=True)
+        return documents,None
+    except Exception as exc: return [],f"Collegamento Google PDF non disponibile: {exc}"
 
-def sync_google_documents(customer_code, document_type):
-    saved=0;errors=[]
-    for order_number in known_customer_orders(customer_code):
-        if document_type=="conferma":
-            document,error=load_google_order_pdf(customer_code,order_number);documents=[document] if document else []
-        else:
-            documents,error=load_google_ddt(customer_code,order_number)
-        if error: errors.append(f"{order_number}: {error}");continue
-        for document in documents or []:
-            save_customer_document(customer_code,document_type,order_number,document["filename"],document["content"],document.get("source","Google Drive"));saved+=1
-    return saved,errors
-
-def document_archive_page(user, document_type):
-    is_admin=user.get("role")=="admin"
-    title="Conferme Ordine" if document_type=="conferma" else "DDT"
-    st.title(title)
-    st.caption("Archivio PDF permanente e indipendente dagli aggiornamenti dei dati commerciali.")
+def document_archive_page(user,document_type):
+    is_admin=user.get("role")=="admin";title="Conferme Ordine" if document_type=="conferma" else "DDT"
+    st.title(title);st.caption("Documenti acquisiti automaticamente da Google Drive, ordinati dal più recente al meno recente.")
     if is_admin:
         labels={f"{info['name']} · {code}":code for code,info in CLIENTS.items()}
         selected=st.selectbox("Cliente",list(labels.keys()),key=f"archive_client_{document_type}");code=labels[selected]
@@ -1000,34 +961,26 @@ def document_archive_page(user, document_type):
         code=str(user.get("customer_code") or user.get("code") or "").strip().upper()
         if not code or code not in CLIENTS: st.error("Cliente non associato all'account.");return
         st.caption(CLIENTS[code]["name"])
-    if is_admin:
-        with st.expander(f"Carica {title}",expanded=False):
-            order_number=st.text_input("Numero ordine",key=f"archive_order_{document_type}_{code}").strip().upper()
-            uploads=st.file_uploader("Seleziona uno o più PDF",type=["pdf"],accept_multiple_files=True,key=f"archive_upload_{document_type}_{code}")
-            if st.button("Salva documenti",type="primary",disabled=not uploads,key=f"archive_save_{document_type}_{code}"):
-                for upload in uploads: save_customer_document(code,document_type,order_number,upload.name,upload.getvalue(),"Caricamento Admin")
-                st.success(f"Salvati {len(uploads)} documenti nell'archivio {title}.");st.rerun()
-        if st.button("Aggiorna archivio da Google Drive",key=f"archive_sync_{document_type}_{code}"):
-            with st.spinner("Ricerca dei nuovi documenti in corso..."): saved,errors=sync_google_documents(code,document_type)
-            if saved: st.success(f"Acquisiti o aggiornati {saved} documenti.")
-            else: st.info("Nessun nuovo documento trovato tra gli ordini attualmente disponibili.")
-            if errors: st.warning(f"Alcuni controlli non sono riusciti ({len(errors)}).")
-            st.rerun()
-    documents=load_customer_documents(code,document_type)
+    with st.spinner("Caricamento documenti in corso..."):
+        documents,error=load_google_archive(code,document_type)
+    if error: st.warning(error);return
     if not documents: st.info(f"Nessun documento presente nell'archivio {title}.");return
     options={}
-    for row in documents:
-        date=row["received_at"].strftime("%d/%m/%Y") if row.get("received_at") else "Data non disponibile"
-        order=row.get("order_number") or "Senza numero ordine";label=f"{order} · {row['filename']} · {date}"
-        if label in options: label=f"{label} · ID {row['id']}"
+    for index,row in enumerate(documents):
+        raw=row.get("created_at") or "";date_label="Data non disponibile"
+        try: date_label=pd.to_datetime(raw,utc=True).tz_convert("Europe/Rome").strftime("%d/%m/%Y")
+        except Exception: pass
+        if document_type=="conferma": base=row.get("order_number") or re.sub(r"\.pdf$","",row["filename"],flags=re.I)
+        else: base=re.sub(r"\.pdf$","",row["filename"],flags=re.I)
+        label=f"{base} · {date_label}"
+        if label in options: label=f"{label} · {index+1}"
         options[label]=row
     selected_label=st.selectbox(f"Seleziona {title.lower()}",list(options.keys()),key=f"archive_selector_{document_type}_{code}")
-    row=options[selected_label];pdf_bytes=bytes(row["content"]);pdf_b64=base64.b64encode(pdf_bytes).decode("ascii")
-    c1,c2=st.columns([1,1])
-    with c1: st.download_button("Scarica PDF",data=pdf_bytes,file_name=row["filename"],mime="application/pdf",type="primary",use_container_width=True,key=f"archive_download_{document_type}_{row['id']}")
+    row=options[selected_label];pdf_bytes=row["content"];pdf_b64=base64.b64encode(pdf_bytes).decode("ascii")
+    c1,c2=st.columns(2)
+    with c1: st.download_button("Scarica PDF",data=pdf_bytes,file_name=row["filename"],mime="application/pdf",type="primary",use_container_width=True,key=f"archive_download_{document_type}_{code}_{selected_label}")
     with c2: st.markdown(f'<a href="data:application/pdf;base64,{pdf_b64}" target="_blank" style="display:block;text-align:center;padding:.55rem 1rem;border:1px solid #087dac;border-radius:.5rem;text-decoration:none;font-weight:700;color:#087dac;background:#fff">Apri / Stampa PDF</a>',unsafe_allow_html=True)
-    st.caption(f"Ordine: {row.get('order_number') or 'non indicato'} · Origine: {row.get('source') or 'Archivio'}")
-    st.markdown(f'<iframe src="data:application/pdf;base64,{pdf_b64}" width="100%" height="760" style="border:1px solid #d7dde5;border-radius:8px;background:#fff"></iframe>',unsafe_allow_html=True)
+    st.caption(f"Origine: {row.get('source','Google Drive')}")
 
 def order_pdfs_page():
     st.title("Gestione PDF conferme Clivet")
