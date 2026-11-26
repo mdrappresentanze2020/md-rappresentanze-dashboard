@@ -1084,11 +1084,9 @@ def pdf_image_preview(pdf_bytes,document_type):
             st.info("Anteprima non disponibile per questo documento.");return
         st.image(first_page,use_container_width=True,caption="Pagina 1")
         if page_count>1:
-            show_all=st.checkbox(f"Mostra tutte le pagine ({page_count})",value=False,key=f"show_pages_{document_type}_{hash(pdf_bytes[:512])}")
-            if show_all:
-                for page_no in range(1,page_count):
-                    image,_=render_pdf_page_png(pdf_bytes,page_no,150)
-                    if image: st.image(image,use_container_width=True,caption=f"Pagina {page_no+1}")
+            for page_no in range(1,page_count):
+                image,_=render_pdf_page_png(pdf_bytes,page_no,150)
+                if image: st.image(image,use_container_width=True,caption=f"Pagina {page_no+1}")
     except Exception as exc:
         st.info(f"Anteprima non disponibile: {exc}")
 
