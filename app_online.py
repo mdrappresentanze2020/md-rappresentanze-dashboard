@@ -2355,14 +2355,16 @@ def extract_order_rows(pdf_bytes):
     found={}
     for raw in extracted.splitlines():
         line=re.sub(r'\s+',' ',raw).strip()
-        # Codici tecnici alfanumerici e quantità vicina. La tabella rimane sempre modificabile.
-        codes=re.findall(r'\b(?=[A-Z0-9._/-]{5,}\b)(?=[A-Z0-9._/-]*[A-Z])(?=[A-Z0-9._/-]*\d)[A-Z0-9][A-Z0-9._/-]+\b',line.upper())
-        nums=re.findall(r'(?<![A-Z0-9])([1-9][0-9]{0,3})(?![A-Z0-9])',line.upper())
-        qty=int(nums[-1]) if nums else 1
+        upper=line.upper()
+        codes=re.findall(r'\b(?=[A-Z0-9._/-]{5,}\b)(?=[A-Z0-9._/-]*[A-Z])(?=[A-Z0-9._/-]*\d)[A-Z0-9][A-Z0-9._/-]+\b',upper)
         for code in codes:
-            if code.startswith(('SO','DDT')) or code in ('CLIVET','GROUP1'): continue
+            if code.startswith(('SO','DDT')) or code in ('CLIVET','GROUP1') or len(code)>30: continue
+            # Cerca una quantità solo immediatamente dopo il codice; altrimenti usa 1.
+            after=upper.split(code,1)[1][:30]
+            qty_match=re.search(r'^\s*(?:X|QTA|Q\.TA|QTÀ|QUANTITÀ)?\s*[:=-]?\s*([1-9][0-9]{0,2})(?:\s|$)',after)
+            qty=int(qty_match.group(1)) if qty_match else 1
             found[code]=found.get(code,0)+qty
-    return [{'Codice rilevato':k,'Quantità':v} for k,v in found.items()],None
+    return [{'Codice prodotto':k,'Quantità':v} for k,v in found.items()],None
 
 def build_order_xml(rows,external_quote):
     root=ET.Element('rows',{'externalQuoteNumber':external_quote or '/2026','application':'MDV_VRF_SELECT_BASE'})
@@ -2429,30 +2431,53 @@ def send_order_page(user):
             delete_customer_pdf_order(selected_order['id'],code)
             st.success('Ordine cancellato definitivamente.');st.rerun()
 
-def xml_orders_page():
-    st.title('Ordini PDF → XML')
+def order_codes_page():
+    st.title('Codici Ordine')
+    st.caption('Estrai i codici dal PDF, correggi la tabella e copia i dati nel programma Clivet.')
     orders=load_customer_pdf_orders()
-    if not orders: st.info('Nessun ordine cliente disponibile.');return
+    if not orders:
+        st.info('Nessun ordine cliente disponibile.');return
     labels={f"{CLIENTS.get(r['customer_code'],{}).get('name',r['customer_code'])} · {r['reference'] or r['filename']}":r for r in orders}
-    selected=labels[st.selectbox('Ordine cliente',list(labels.keys()),key='xml_order_select')]
+    selected=labels[st.selectbox('Ordine cliente',list(labels.keys()),key='codes_order_select')]
     detected,error=extract_order_rows(bytes(selected['content']))
     if error: st.warning(error)
-    mappings=load_xml_mappings();rows=[]
-    for item in detected:
-        mapping=mappings.get(item['Codice rilevato'],{})
-        rows.append({**item,'productCode':mapping.get('product_code',''),'commercialCode':mapping.get('commercial_code',''),'Prefisso posizione':mapping.get('position_prefix',''),'group':mapping.get('group_name','Group1')})
-    st.caption('Correggi codici e quantità prima di generare l’XML. Le associazioni salvate saranno riutilizzate nei prossimi ordini.')
-    edited=st.data_editor(pd.DataFrame(rows,columns=['Codice rilevato','productCode','commercialCode','Quantità','Prefisso posizione','group']),num_rows='dynamic',use_container_width=True,key=f"xml_editor_{selected['id']}")
-    external=st.text_input('externalQuoteNumber',value='/2026')
-    c1,c2=st.columns(2)
-    if c1.button('Salva anagrafica codici',use_container_width=True):
-        save_xml_mappings(edited.to_dict('records'));st.success('Anagrafica aggiornata.')
-    records=edited.to_dict('records')
-    incomplete=[r for r in records if not str(r.get('productCode','')).strip() or not str(r.get('commercialCode','')).strip()]
-    if incomplete: st.warning(f"Completa productCode e commercialCode per {len(incomplete)} righe prima di generare l’XML.")
-    else:
-        xml_bytes=build_order_xml(records,external.strip())
-        st.download_button('Genera e scarica XML',xml_bytes,file_name=f"ordine_{selected['id']}.xml",mime='application/xml',type='primary',use_container_width=True)
+    if not detected:
+        detected=[{'Codice prodotto':'','Quantità':1}]
+        st.info('Nessun codice riconosciuto automaticamente. Puoi inserirli manualmente nella tabella.')
+    st.markdown('**Controlla e correggi codici e quantità**')
+    edited=st.data_editor(
+        pd.DataFrame(detected,columns=['Codice prodotto','Quantità']),
+        num_rows='dynamic',use_container_width=True,key=f"codes_editor_{selected['id']}",
+        column_config={
+            'Codice prodotto':st.column_config.TextColumn('Codice prodotto',required=True),
+            'Quantità':st.column_config.NumberColumn('Quantità',min_value=1,step=1,required=True),
+        }
+    )
+    records=[]
+    for row in edited.to_dict('records'):
+        code=str(row.get('Codice prodotto','')).strip().upper()
+        try: qty=int(row.get('Quantità',1) or 1)
+        except Exception: qty=1
+        if code: records.append({'Codice prodotto':code,'Quantità':max(qty,1)})
+    if not records:
+        st.warning('Inserisci almeno un codice prodotto.');return
+    only_codes='\n'.join(r['Codice prodotto'] for r in records)
+    code_qty='\n'.join(f"{r['Codice prodotto']}\t{r['Quantità']}" for r in records)
+    csv_bytes=pd.DataFrame(records).to_csv(index=False,sep=';').encode('utf-8-sig')
+    tab1,tab2,tab3=st.tabs(['Solo codici','Codice + quantità','Excel / CSV'])
+    with tab1:
+        st.caption('Usa il pulsante Copia nell’angolo del riquadro.')
+        st.code(only_codes,language=None)
+        st.download_button('Scarica TXT solo codici',only_codes.encode('utf-8'),file_name=f"codici_ordine_{selected['id']}.txt",mime='text/plain',use_container_width=True)
+    with tab2:
+        st.caption('Codice e quantità sono separati da TAB, pronti da incollare su due colonne.')
+        st.code(code_qty,language=None)
+        st.download_button('Scarica TXT codice + quantità',code_qty.encode('utf-8'),file_name=f"codici_quantita_{selected['id']}.txt",mime='text/plain',use_container_width=True)
+    with tab3:
+        st.dataframe(pd.DataFrame(records),use_container_width=True,hide_index=True)
+        st.download_button('Scarica CSV',csv_bytes,file_name=f"codici_ordine_{selected['id']}.csv",mime='text/csv',type='primary',use_container_width=True)
+    with st.expander('Anteprima PDF ordine'):
+        pdf_image_preview(bytes(selected['content']),'ordine_codici')
 
 def targets_page():
     st.title("Target annuali")
@@ -2545,7 +2570,7 @@ with st.sidebar:
         st.session_state.user=None
         time.sleep(0.7)
         st.rerun()
-    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Ordini Clienti","Ordini PDF → XML","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
+    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Ordini Clienti","Codici Ordine","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
@@ -2553,7 +2578,7 @@ if page=="Conferme Ordine": document_archive_page(user,"conferma");st.stop()
 if page=="DDT": document_archive_page(user,"ddt");st.stop()
 if page=="Invia Ordine": send_order_page(user);st.stop()
 if page=="Ordini Clienti": send_order_page(user);st.stop()
-if page=="Ordini PDF → XML": xml_orders_page();st.stop()
+if page=="Codici Ordine": order_codes_page();st.stop()
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
