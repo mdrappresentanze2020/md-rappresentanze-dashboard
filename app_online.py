@@ -2409,14 +2409,25 @@ def import_order_price_list(catalog,uploaded_file):
             if model.upper()=='MODELLO' or not re.fullmatch(r'\d{6,12}',code): continue
             rows.append((code,model,model,price))
     else:
-        data=pd.read_excel(io.BytesIO(raw),engine='openpyxl')
+        data=pd.read_excel(io.BytesIO(raw),engine='openpyxl',dtype=object)
+        # Normalizza le intestazioni per tollerare spazi invisibili o varianti Excel.
+        data.columns=[str(c).strip() for c in data.columns]
+        required={'CodArt','DesArt1','DesArt2+DescEst','PrezzoListino'}
+        if not required.issubset(set(data.columns)):
+            raise ValueError('Colonne HOME / SPLIT non riconosciute. Richieste: CodArt, DesArt1, DesArt2+DescEst, PrezzoListino.')
         for _,r in data.iterrows():
-            code=str(r.get('CodArt','')).strip().replace('.0','')
+            raw_code=r.get('CodArt')
+            if pd.isna(raw_code): continue
+            try: code=str(int(float(raw_code)))
+            except Exception: code=re.sub(r'\D','',str(raw_code))
             if not re.fullmatch(r'\d{6,12}',code): continue
-            model=str(r.get('DesArt1','') or '').strip()
-            description=str(r.get('DesArt2+DescEst','') or '').strip()
-            try: price=float(r.get('PrezzoListino',0) or 0)
-            except Exception: price=0.0
+            model='' if pd.isna(r.get('DesArt1')) else str(r.get('DesArt1')).strip()
+            description='' if pd.isna(r.get('DesArt2+DescEst')) else str(r.get('DesArt2+DescEst')).strip()
+            raw_price=r.get('PrezzoListino',0)
+            try: price=float(raw_price)
+            except Exception:
+                try: price=float(str(raw_price).replace('€','').replace('.','').replace(',','.').strip())
+                except Exception: price=0.0
             rows.append((code,model,description,price))
     def operation(connection):
         with connection.session as session:
@@ -2439,14 +2450,28 @@ def load_order_price_list(catalog):
 def price_lists_admin_page():
     st.title('Gestione listini ordini')
     st.caption('Carica il listino HOME / SPLIT o VRF. APPLIED resta a compilazione manuale.')
-    catalog=st.selectbox('Catalogo',['HOME / SPLIT','VRF'])
-    uploaded=st.file_uploader('Listino Excel',type=['xlsx'],key='price_list_upload')
-    if st.button('Importa listino',type='primary',use_container_width=True,disabled=uploaded is None):
-        count=import_order_price_list(catalog,uploaded)
-        if count: st.success(f'Importati {count} articoli nel catalogo {catalog}.')
-        else: st.error('Nessun articolo importato. Verifica di aver selezionato il catalogo corretto per questo file Excel.')
-    current=load_order_price_list(catalog)
-    st.metric('Articoli disponibili',len(current))
+    with st.form('import_price_list_form',clear_on_submit=False):
+        catalog=st.selectbox('Catalogo',['HOME / SPLIT','VRF'])
+        uploaded=st.file_uploader('Listino Excel',type=['xlsx'],key='price_list_upload')
+        submitted=st.form_submit_button('Importa listino',type='primary',use_container_width=True)
+    if submitted:
+        if uploaded is None:
+            st.error('Seleziona prima il file Excel da importare.')
+        else:
+            try:
+                with st.spinner('Importazione listino in corso...'):
+                    count=import_order_price_list(catalog,uploaded)
+                if count:
+                    st.success(f'Importati {count} articoli nel catalogo {catalog}.')
+                else:
+                    st.error('Nessun articolo importato. Il file non contiene righe riconoscibili per il catalogo selezionato.')
+            except Exception as exc:
+                st.error(f'Errore durante l’importazione: {exc}')
+    try:
+        current=load_order_price_list(catalog)
+        st.metric('Articoli disponibili',len(current))
+    except Exception as exc:
+        st.error(f'Impossibile leggere il listino salvato: {exc}')
 
 def delete_customer_pdf_order(order_id, customer_code=None):
     ensure_customer_orders_tables()
