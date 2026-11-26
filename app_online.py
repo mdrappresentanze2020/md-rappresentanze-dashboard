@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 from pypdf import PdfReader
+import fitz
 from sqlalchemy import text
 
 st.set_page_config(page_title="MD Rappresentanze | Clienti", page_icon="📊", layout="wide")
@@ -1066,6 +1067,31 @@ def _document_summary(extracted, document_type):
         info["Consegna prevista"]=delivery
     return info,lines
 
+def render_pdf_page_png(pdf_bytes,page_number=0,dpi=150):
+    doc=fitz.open(stream=pdf_bytes,filetype="pdf")
+    try:
+        if not doc or page_number<0 or page_number>=doc.page_count: return None,0
+        pix=doc.load_page(page_number).get_pixmap(dpi=dpi,alpha=False)
+        return pix.tobytes("png"),doc.page_count
+    finally:
+        doc.close()
+
+def pdf_image_preview(pdf_bytes,document_type):
+    st.subheader("Anteprima documento")
+    try:
+        first_page,page_count=render_pdf_page_png(pdf_bytes,0,150)
+        if not first_page:
+            st.info("Anteprima non disponibile per questo documento.");return
+        st.image(first_page,use_container_width=True,caption="Pagina 1")
+        if page_count>1:
+            show_all=st.checkbox(f"Mostra tutte le pagine ({page_count})",value=False,key=f"show_pages_{document_type}_{hash(pdf_bytes[:512])}")
+            if show_all:
+                for page_no in range(1,page_count):
+                    image,_=render_pdf_page_png(pdf_bytes,page_no,150)
+                    if image: st.image(image,use_container_width=True,caption=f"Pagina {page_no+1}")
+    except Exception as exc:
+        st.info(f"Anteprima non disponibile: {exc}")
+
 def document_content_block(pdf_bytes,document_type):
     extracted,error=extract_pdf_text(pdf_bytes)
     title="Contenuto Conferma Ordine" if document_type=="conferma" else "Contenuto DDT"
@@ -1182,6 +1208,7 @@ def document_archive_page(user,document_type):
     pdf_b64=base64.b64encode(pdf_bytes).decode("ascii")
     st.download_button("Scarica PDF",data=pdf_bytes,file_name=row["filename"],mime="application/pdf",type="primary",use_container_width=True,key=f"archive_download_{document_type}_{code}_{selected_label}")
     st.caption(f"Origine: {row.get('source','Google Drive')}")
+    pdf_image_preview(pdf_bytes,document_type)
     document_content_block(pdf_bytes,document_type)
 
 def order_pdfs_page():
