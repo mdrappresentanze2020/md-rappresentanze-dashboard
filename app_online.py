@@ -1209,7 +1209,6 @@ def document_archive_page(user,document_type):
     st.download_button("Scarica PDF",data=pdf_bytes,file_name=row["filename"],mime="application/pdf",type="primary",use_container_width=True,key=f"archive_download_{document_type}_{code}_{selected_label}")
     st.caption(f"Origine: {row.get('source','Google Drive')}")
     pdf_image_preview(pdf_bytes,document_type)
-    document_content_block(pdf_bytes,document_type)
 
 def order_pdfs_page():
     st.title("Gestione PDF conferme Clivet")
