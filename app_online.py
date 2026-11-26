@@ -948,7 +948,7 @@ def load_google_archive(customer_code, document_type):
             key=order if document_type=="conferma" and order else filename.casefold()
             if key in seen: continue
             seen.add(key)
-            documents.append({"order_number":order,"filename":filename,"file_id":item.get("id") or "","created_at":item.get("createdAt") or item.get("updatedAt") or "","source":"Google Drive"})
+            documents.append({"order_number":order,"filename":filename,"file_id":item.get("id") or "","created_at":item.get("documentDate") or item.get("createdAt") or item.get("updatedAt") or "","source":"Google Drive"})
         documents.sort(key=lambda x:(x["created_at"],x["filename"]),reverse=True)
         return documents,None
     except Exception as exc: return [],f"Collegamento Google PDF non disponibile: {exc}"
