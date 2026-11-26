@@ -2386,35 +2386,23 @@ def build_order_xml(rows,external_quote):
     ET.indent(root,space='    ')
     return ET.tostring(root,encoding='utf-8',xml_declaration=False)
 
-def import_order_price_list(catalog,uploaded_file):
-    ensure_customer_orders_tables()
-    raw=uploaded_file.getvalue()
-    preview=pd.read_excel(io.BytesIO(raw),header=None,engine='openpyxl')
-    rows=[]
+def _parse_order_price_list(catalog,uploaded_file):
+    raw=uploaded_file.getvalue();rows=[]
     if catalog=='VRF':
-        # Il listino VRF ha intestazioni ripetute e può iniziare dopo alcune righe.
-        # Leggiamo tutte le righe e normalizziamo i valori numerici di Excel.
-        for _,r in preview.iterrows():
-            model=str(r.iloc[0]).strip() if len(r)>0 and pd.notna(r.iloc[0]) else ''
-            raw_code=r.iloc[1] if len(r)>1 else None
-            raw_price=r.iloc[2] if len(r)>2 else None
+        data=pd.read_excel(io.BytesIO(raw),header=None,engine='openpyxl',dtype=object)
+        for _,r in data.iterrows():
+            model='' if len(r)<1 or pd.isna(r.iloc[0]) else str(r.iloc[0]).strip()
+            raw_code=None if len(r)<2 else r.iloc[1];raw_price=None if len(r)<3 else r.iloc[2]
             if pd.isna(raw_code) or pd.isna(raw_price): continue
-            try:
-                code=str(int(float(raw_code)))
-            except Exception:
-                code=re.sub(r'\D','',str(raw_code))
-            try:
-                price=float(str(raw_price).replace('€','').replace('.','').replace(',','.').strip()) if isinstance(raw_price,str) else float(raw_price)
+            try: code=str(int(float(raw_code)))
+            except Exception: code=re.sub(r'\D','',str(raw_code))
+            try: price=float(raw_price)
             except Exception: continue
-            if model.upper()=='MODELLO' or not re.fullmatch(r'\d{6,12}',code): continue
-            rows.append((code,model,model,price))
+            if model.upper()!='MODELLO' and re.fullmatch(r'\d{6,12}',code): rows.append({'product_code':code,'model':model,'description':model,'list_price':price})
     else:
-        data=pd.read_excel(io.BytesIO(raw),engine='openpyxl',dtype=object)
-        # Normalizza le intestazioni per tollerare spazi invisibili o varianti Excel.
-        data.columns=[str(c).strip() for c in data.columns]
+        data=pd.read_excel(io.BytesIO(raw),engine='openpyxl',dtype=object);data.columns=[str(c).strip() for c in data.columns]
         required={'CodArt','DesArt1','DesArt2+DescEst','PrezzoListino'}
-        if not required.issubset(set(data.columns)):
-            raise ValueError('Colonne HOME / SPLIT non riconosciute. Richieste: CodArt, DesArt1, DesArt2+DescEst, PrezzoListino.')
+        if not required.issubset(data.columns): raise ValueError('Colonne HOME / SPLIT non riconosciute.')
         for _,r in data.iterrows():
             raw_code=r.get('CodArt')
             if pd.isna(raw_code): continue
@@ -2423,35 +2411,28 @@ def import_order_price_list(catalog,uploaded_file):
             if not re.fullmatch(r'\d{6,12}',code): continue
             model='' if pd.isna(r.get('DesArt1')) else str(r.get('DesArt1')).strip()
             description='' if pd.isna(r.get('DesArt2+DescEst')) else str(r.get('DesArt2+DescEst')).strip()
-            raw_price=r.get('PrezzoListino',0)
-            try: price=float(raw_price)
-            except Exception:
-                try: price=float(str(raw_price).replace('€','').replace('.','').replace(',','.').strip())
-                except Exception: price=0.0
-            rows.append((code,model,description,price))
-    # Elimina i duplicati nel file prima dell'inserimento, mantenendo l'ultima riga per codice.
-    unique_rows={code:(code,model,description,price) for code,model,description,price in rows}
-    payload=[{'catalog':catalog,'code':code,'model':model,'description':description,'price':price} for code,model,description,price in unique_rows.values()]
+            try: price=float(r.get('PrezzoListino',0) or 0)
+            except Exception: price=0.0
+            rows.append({'product_code':code,'model':model,'description':description,'list_price':price})
+    return list({r['product_code']:r for r in rows}.values())
+
+def import_order_price_list(catalog,uploaded_file):
+    ensure_customer_orders_tables();rows=_parse_order_price_list(catalog,uploaded_file)
+    payload=json.dumps(rows,ensure_ascii=False)
     def operation(connection):
         with connection.session as session:
-            session.execute(text('DELETE FROM order_price_lists WHERE catalog=:catalog'),{'catalog':catalog})
-            if payload:
-                session.execute(text("""INSERT INTO order_price_lists(catalog,product_code,model,description,list_price,updated_at)
-                    VALUES(:catalog,:code,:model,:description,:price,CURRENT_TIMESTAMP)
-                    ON CONFLICT(catalog,product_code) DO UPDATE SET
-                        model=EXCLUDED.model,
-                        description=EXCLUDED.description,
-                        list_price=EXCLUDED.list_price,
-                        updated_at=CURRENT_TIMESTAMP"""),payload)
+            session.execute(text("CREATE TABLE IF NOT EXISTS order_price_list_store (catalog TEXT PRIMARY KEY,payload_json TEXT NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"))
+            session.execute(text("INSERT INTO order_price_list_store(catalog,payload_json,updated_at) VALUES(:catalog,:payload,CURRENT_TIMESTAMP) ON CONFLICT(catalog) DO UPDATE SET payload_json=EXCLUDED.payload_json,updated_at=CURRENT_TIMESTAMP"),{'catalog':catalog,'payload':payload})
             session.commit()
-    run_db_with_retry(operation);return len(payload)
+    run_db_with_retry(operation);return len(rows)
 
 def load_order_price_list(catalog):
     ensure_customer_orders_tables()
     def operation(connection):
         with connection.session as session:
-            rows=session.execute(text('SELECT product_code,model,description,list_price FROM order_price_lists WHERE catalog=:catalog'),{'catalog':catalog}).mappings().all()
-            return {str(r['product_code']):dict(r) for r in rows}
+            session.execute(text("CREATE TABLE IF NOT EXISTS order_price_list_store (catalog TEXT PRIMARY KEY,payload_json TEXT NOT NULL,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"))
+            value=session.execute(text('SELECT payload_json FROM order_price_list_store WHERE catalog=:catalog'),{'catalog':catalog}).scalar()
+            return {r['product_code']:r for r in json.loads(value)} if value else {}
     return run_db_with_retry(operation)
 
 def price_lists_admin_page():
@@ -2462,23 +2443,16 @@ def price_lists_admin_page():
         uploaded=st.file_uploader('Listino Excel',type=['xlsx'],key='price_list_upload')
         submitted=st.form_submit_button('Importa listino',type='primary',use_container_width=True)
     if submitted:
-        if uploaded is None:
-            st.error('Seleziona prima il file Excel da importare.')
+        if uploaded is None: st.error('Seleziona prima il file Excel da importare.')
         else:
             try:
                 with st.spinner('Importazione listino in corso...'):
                     count=import_order_price_list(catalog,uploaded)
-                if count:
-                    st.success(f'Importati {count} articoli nel catalogo {catalog}.')
-                else:
-                    st.error('Nessun articolo importato. Il file non contiene righe riconoscibili per il catalogo selezionato.')
-            except Exception as exc:
-                st.error(f'Errore durante l’importazione: {exc}')
-    try:
-        current=load_order_price_list(catalog)
-        st.metric('Articoli disponibili',len(current))
-    except Exception as exc:
-        st.error(f'Impossibile leggere il listino salvato: {exc}')
+                st.success(f'Importati {count} articoli nel catalogo {catalog}.')
+                st.rerun()
+            except Exception as exc: st.error(f'Errore durante l’importazione: {exc}')
+    current=load_order_price_list(catalog)
+    st.metric('Articoli disponibili',len(current))
 
 def delete_customer_pdf_order(order_id, customer_code=None):
     ensure_customer_orders_tables()
