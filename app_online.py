@@ -940,16 +940,28 @@ def load_google_archive(customer_code, document_type):
         if not payload.get("ok"): return [],payload.get("errore") or "Risposta Google non valida."
         documents=[];seen=set()
         for item in payload.get("files") or []:
-            if not item.get("pdf"): continue
             order=str(item.get("ordine") or "").strip().upper()
             filename=str(item.get("filename") or "documento.pdf").strip()
             key=order if document_type=="conferma" and order else filename.casefold()
             if key in seen: continue
             seen.add(key)
-            documents.append({"order_number":order,"filename":filename,"content":base64.b64decode(item["pdf"]),"created_at":item.get("createdAt") or item.get("updatedAt") or "","source":"Google Drive"})
+            documents.append({"order_number":order,"filename":filename,"file_id":item.get("id") or "","created_at":item.get("createdAt") or item.get("updatedAt") or "","source":"Google Drive"})
         documents.sort(key=lambda x:(x["created_at"],x["filename"]),reverse=True)
         return documents,None
     except Exception as exc: return [],f"Collegamento Google PDF non disponibile: {exc}"
+
+def load_google_archive_pdf(customer_code, document_type, file_id):
+    config=st.secrets.get("google_pdf",{})
+    webapp_url=str(config.get("webapp_url","")).strip();token=str(config.get("token","")).strip()
+    if not webapp_url or not token: return None,"Configurazione Google PDF non disponibile."
+    params=urllib.parse.urlencode({"cliente":str(customer_code).strip().upper(),"tipo":str(document_type).strip().lower(),"file_id":str(file_id).strip(),"token":token})
+    url=webapp_url+("&" if "?" in webapp_url else "?")+params
+    try:
+        request=urllib.request.Request(url,headers={"User-Agent":"MD-Rappresentanze-Dashboard/1.0"})
+        with urllib.request.urlopen(request,timeout=60) as response: payload=json.loads(response.read().decode("utf-8"))
+        if not payload.get("ok") or not payload.get("pdf"): return None,payload.get("errore") or "PDF non disponibile."
+        return base64.b64decode(payload["pdf"]),None
+    except Exception as exc: return None,f"Collegamento Google PDF non disponibile: {exc}"
 
 def document_archive_page(user,document_type):
     is_admin=user.get("role")=="admin";title="Conferme Ordine" if document_type=="conferma" else "DDT"
@@ -976,7 +988,13 @@ def document_archive_page(user,document_type):
         if label in options: label=f"{label} · {index+1}"
         options[label]=row
     selected_label=st.selectbox(f"Seleziona {title.lower()}",list(options.keys()),key=f"archive_selector_{document_type}_{code}")
-    row=options[selected_label];pdf_bytes=row["content"];pdf_b64=base64.b64encode(pdf_bytes).decode("ascii")
+    row=options[selected_label]
+    with st.spinner("Caricamento del PDF selezionato..."):
+        pdf_bytes,pdf_error=load_google_archive_pdf(code,document_type,row.get("file_id"))
+    if pdf_error or not pdf_bytes:
+        st.warning(pdf_error or "PDF non disponibile.")
+        return
+    pdf_b64=base64.b64encode(pdf_bytes).decode("ascii")
     c1,c2=st.columns(2)
     with c1: st.download_button("Scarica PDF",data=pdf_bytes,file_name=row["filename"],mime="application/pdf",type="primary",use_container_width=True,key=f"archive_download_{document_type}_{code}_{selected_label}")
     with c2: st.markdown(f'<a href="data:application/pdf;base64,{pdf_b64}" target="_blank" style="display:block;text-align:center;padding:.55rem 1rem;border:1px solid #087dac;border-radius:.5rem;text-decoration:none;font-weight:700;color:#087dac;background:#fff">Apri / Stampa PDF</a>',unsafe_allow_html=True)
