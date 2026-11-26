@@ -2160,3 +2160,4 @@ try:
     if found_code!=code: raise ValueError("Il dataset non corrisponde all'utente collegato.")
     dashboard(data,found_code,name);st.caption(f"Ultimo aggiornamento: {record['updated_at']}")
 except Exception as exc: st.error(f"Errore nella lettura dei dati: {exc}")
+
