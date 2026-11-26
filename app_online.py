@@ -31,28 +31,26 @@ html,body,button,input,textarea,select,[data-testid="stMetric"],[data-testid="st
 [data-testid="stSidebar"] button{background:#2f2f2f!important;border:1px solid #2f2f2f!important}
 [data-testid="stSidebar"] button p,[data-testid="stSidebar"] button span,[data-testid="stSidebar"] button div{color:#ffffff!important;font-weight:700!important}
 [data-testid="stSidebar"] button:hover{background:#087dac!important;border-color:#087dac!important}
-/* Pulsante di chiusura/apertura sidebar: ripristina l'icona Material e la rende rossa. */
-[data-testid="stSidebarCollapseButton"] button{background:transparent!important;border:0!important;box-shadow:none!important}
-[data-testid="stSidebarCollapseButton"] button:hover{background:#fff1f2!important;border:0!important}
-[data-testid="stSidebarCollapseButton"] span,
-[data-testid="stSidebarCollapseButton"] svg{font-family:"Material Symbols Rounded","Material Symbols Outlined"!important;color:#d63f4f!important;fill:#d63f4f!important;-webkit-text-fill-color:#d63f4f!important}
-/* Icona per riaprire il menu quando la sidebar e chiusa. */
-[data-testid="stSidebarCollapsedControl"]{display:flex!important;visibility:visible!important;opacity:1!important;position:fixed!important;left:10px!important;top:12px!important;z-index:1000000!important}
-[data-testid="stSidebarCollapsedControl"] button{display:flex!important;visibility:visible!important;opacity:1!important;background:#ffffff!important;border:2px solid #d63f4f!important;border-radius:9px!important;box-shadow:0 2px 8px rgba(0,0,0,.18)!important;width:42px!important;height:42px!important;padding:7px!important}
-[data-testid="stSidebarCollapsedControl"] button:hover{background:#fff1f2!important;border-color:#b92f3f!important}
-[data-testid="stSidebarCollapsedControl"] span,
-[data-testid="stSidebarCollapsedControl"] svg{font-family:"Material Symbols Rounded","Material Symbols Outlined"!important;color:#d63f4f!important;fill:#d63f4f!important;-webkit-text-fill-color:#d63f4f!important;font-size:27px!important}
-
-/* Fix definitivo toggle sidebar senza dipendere dal font Material Symbols. */
+/* Toggle sidebar: supporta i selettori Streamlit vecchi e nuovi. */
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="stExpandSidebarButton"]{display:flex!important;visibility:visible!important;opacity:1!important;position:fixed!important;left:10px!important;top:12px!important;z-index:1000000!important}
 [data-testid="stSidebarCollapsedControl"] button,
-[data-testid="stSidebarCollapseButton"] button{font-size:0!important;line-height:0!important}
-[data-testid="stSidebarCollapsedControl"] button span,
-[data-testid="stSidebarCollapsedControl"] button svg,
-[data-testid="stSidebarCollapseButton"] button span,
-[data-testid="stSidebarCollapseButton"] button svg{display:none!important}
-[data-testid="stSidebarCollapsedControl"] button::before{content:"\00BB"!important;display:block!important;font-family:Arial,sans-serif!important;font-size:34px!important;line-height:30px!important;font-weight:900!important;color:#d63f4f!important;-webkit-text-fill-color:#d63f4f!important}
-[data-testid="stSidebarCollapseButton"] button::before{content:"\00AB"!important;display:block!important;font-family:Arial,sans-serif!important;font-size:34px!important;line-height:30px!important;font-weight:900!important;color:#d63f4f!important;-webkit-text-fill-color:#d63f4f!important}
-[data-testid="stSidebarCollapsedControl"] button{background:#ffffff!important;border:2px solid #d63f4f!important;border-radius:9px!important;width:44px!important;height:44px!important;min-width:44px!important;padding:4px!important}
+[data-testid="stExpandSidebarButton"] button,
+[data-testid="stSidebarCollapseButton"] button,
+button[aria-label="Open sidebar"],button[aria-label="Close sidebar"],
+button[aria-label="Apri sidebar"],button[aria-label="Chiudi sidebar"]{font-size:0!important;line-height:0!important;background:#ffffff!important;border:2px solid #d63f4f!important;border-radius:9px!important;box-shadow:0 2px 8px rgba(0,0,0,.18)!important;width:44px!important;height:44px!important;min-width:44px!important;padding:4px!important;color:transparent!important}
+[data-testid="stSidebarCollapsedControl"] button > *,
+[data-testid="stExpandSidebarButton"] button > *,
+[data-testid="stSidebarCollapseButton"] button > *,
+button[aria-label="Open sidebar"] > *,button[aria-label="Close sidebar"] > *,
+button[aria-label="Apri sidebar"] > *,button[aria-label="Chiudi sidebar"] > *{display:none!important}
+[data-testid="stSidebarCollapsedControl"] button::after,
+[data-testid="stExpandSidebarButton"] button::after,
+button[aria-label="Open sidebar"]::after,button[aria-label="Apri sidebar"]::after{content:"▶"!important;display:block!important;font-family:Arial,sans-serif!important;font-size:25px!important;line-height:32px!important;color:#d63f4f!important;-webkit-text-fill-color:#d63f4f!important}
+[data-testid="stSidebarCollapseButton"] button::after,
+button[aria-label="Close sidebar"]::after,button[aria-label="Chiudi sidebar"]::after{content:"◀"!important;display:block!important;font-family:Arial,sans-serif!important;font-size:25px!important;line-height:32px!important;color:#d63f4f!important;-webkit-text-fill-color:#d63f4f!important}
+/* Evita che il font Aptos trasformi i nomi delle icone Material in testo. */
+[data-testid="stIconMaterial"],.material-symbols-rounded,.material-symbols-outlined{font-family:"Material Symbols Rounded","Material Symbols Outlined"!important}
 
 /* Testo sempre bianco in tutti i pulsanti/riquadri a sfondo scuro */
 button[kind="primary"],button[kind="secondary"],div[data-testid="stFormSubmitButton"] button,.stButton button{color:#ffffff!important}
