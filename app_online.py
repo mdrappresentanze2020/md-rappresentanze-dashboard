@@ -1038,7 +1038,57 @@ def document_content_block(pdf_bytes,document_type):
     # Limita il riepilogo per evitare di riproporre pagine legali/contrattuali.
     useful=useful[:80]
     st.markdown("**Riepilogo commerciale del documento**")
-    st.text_area("Dati estratti",value="\n".join(useful),height=420,disabled=True,key=f"doc_summary_{document_type}_{hash(extracted)}")
+    if document_type=="conferma":
+        # Simula il layout della prima pagina della conferma, usando esclusivamente dati estratti dal PDF.
+        order=info.get("Numero ordine") or "Non rilevato"
+        doc_date=info.get("Data") or "Non rilevata"
+        customer=info.get("Cliente") or "Non rilevato"
+        destination=info.get("Destinazione") or "Non rilevata"
+        delivery=info.get("Consegna prevista") or ""
+        header1,header2=st.columns([2,1])
+        with header1:
+            st.markdown("### CLIVET S.p.A.")
+            st.caption("Riepilogo ricostruito dai dati estratti dal PDF originale")
+        with header2:
+            st.markdown("**CONFERMA D'ORDINE**")
+            st.write(f"**NUM. {order}**")
+            st.write(doc_date)
+        st.divider()
+        a,b=st.columns(2)
+        with a:
+            st.markdown("**CLIENTE**")
+            st.write(customer)
+        with b:
+            st.markdown("**INDIRIZZO DI SPEDIZIONE / DESTINAZIONE**")
+            st.write(destination)
+        if delivery:
+            st.caption(f"Consegna prevista: {delivery}")
+        st.divider()
+        st.markdown("**DETTAGLIO ARTICOLI / IMPORTI**")
+        st.text_area("",value="\n".join(useful),height=330,disabled=True,key=f"doc_layout_{hash(extracted)}",label_visibility="collapsed")
+        st.caption("Questa è una ricostruzione informativa del contenuto estratto. Il PDF originale resta il documento di riferimento.")
+    else:
+        ddt=info.get("Numero DDT") or "Non rilevato"
+        order=info.get("Ordine di riferimento") or "Non rilevato"
+        doc_date=info.get("Data") or "Non rilevata"
+        destination=info.get("Destinazione") or "Non rilevata"
+        h1,h2=st.columns([2,1])
+        with h1: st.markdown("### DOCUMENTO DI TRASPORTO")
+        with h2:
+            st.write(f"**{ddt}**")
+            st.write(doc_date)
+        st.divider()
+        c1,c2=st.columns(2)
+        with c1:
+            st.markdown("**ORDINE DI RIFERIMENTO**")
+            st.write(order)
+        with c2:
+            st.markdown("**DESTINAZIONE**")
+            st.write(destination)
+        st.divider()
+        st.markdown("**DETTAGLIO MATERIALE / QUANTITÀ**")
+        st.text_area("",value="\n".join(useful),height=330,disabled=True,key=f"ddt_layout_{hash(extracted)}",label_visibility="collapsed")
+        st.caption("Questa è una ricostruzione informativa del contenuto estratto. Il PDF originale resta il documento di riferimento.")
 
 def document_archive_page(user,document_type):
     is_admin=user.get("role")=="admin";title="Conferme Ordine" if document_type=="conferma" else "DDT"
