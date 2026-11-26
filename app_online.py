@@ -6,6 +6,7 @@ import json
 import base64
 import urllib.parse
 import urllib.request
+import time
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -144,6 +145,49 @@ def authenticate(username, password):
     user = configured_users().get(username.strip())
     if not user: return None
     return user if hmac.compare_digest(password_hash(password), str(user.get("password_sha256", ""))) else None
+
+SESSION_COOKIE_NAME="md_dashboard_session"
+SESSION_TTL_SECONDS=8*60*60
+
+def session_cookie_secret():
+    configured=str(st.secrets.get("session_cookie_secret","")).strip()
+    if configured: return configured
+    # Fallback stabile basato sulle credenziali cifrate gia presenti nei secrets.
+    raw="|".join(f"{name}:{data.get('password_sha256','')}" for name,data in sorted(configured_users().items()))
+    return hashlib.sha256(("MD-RAPPRESENTANZE|"+raw).encode("utf-8")).hexdigest()
+
+def create_session_token(username):
+    expires=int(time.time())+SESSION_TTL_SECONDS
+    payload=f"{username}|{expires}"
+    signature=hmac.new(session_cookie_secret().encode("utf-8"),payload.encode("utf-8"),hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(f"{payload}|{signature}".encode("utf-8")).decode("ascii")
+
+def restore_session_from_cookie():
+    try:
+        token=st.context.cookies.get(SESSION_COOKIE_NAME)
+        if not token: return None
+        decoded=base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+        username,expires_text,signature=decoded.rsplit("|",2)
+        payload=f"{username}|{expires_text}"
+        expected=hmac.new(session_cookie_secret().encode("utf-8"),payload.encode("utf-8"),hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature,expected): return None
+        if int(expires_text)<int(time.time()): return None
+        user=configured_users().get(username)
+        return {"username":username,**user} if user else None
+    except Exception:
+        return None
+
+def set_browser_cookie(name,value,max_age_seconds):
+    safe_name=json.dumps(str(name));safe_value=json.dumps(str(value));max_age=int(max_age_seconds)
+    components.html(f"""<script>
+    document.cookie={safe_name}+"="+encodeURIComponent({safe_value})+"; Path=/; Max-Age={max_age}; SameSite=Lax; Secure";
+    </script>""",height=0)
+
+def delete_browser_cookie(name):
+    safe_name=json.dumps(str(name))
+    components.html(f"""<script>
+    document.cookie={safe_name}+"=; Path=/; Max-Age=0; SameSite=Lax; Secure";
+    </script>""",height=0)
 
 def db_connection(): return st.connection("postgresql", type="sql")
 def ensure_table():
@@ -2295,6 +2339,10 @@ def upload_page():
 
 st.session_state.setdefault("user",None)
 if not st.session_state.user:
+    restored_user=restore_session_from_cookie()
+    if restored_user:
+        st.session_state.user=restored_user
+if not st.session_state.user:
     st.markdown("""<style>
     [data-testid="stSidebar"]{display:none!important}
     [data-testid="stHeader"]{background:transparent!important}
@@ -2317,7 +2365,12 @@ if not st.session_state.user:
         password=st.text_input("Password",type="password",placeholder="Password")
         if st.form_submit_button("Accedi",type="primary"):
             user=authenticate(username,password)
-            if user: st.session_state.user={"username":username,**user};st.rerun()
+            if user:
+                clean_username=username.strip()
+                st.session_state.user={"username":clean_username,**user}
+                set_browser_cookie(SESSION_COOKIE_NAME,create_session_token(clean_username),SESSION_TTL_SECONDS)
+                time.sleep(0.7)
+                st.rerun()
             else: st.error("Credenziali non valide.")
     st.stop()
 
@@ -2325,7 +2378,11 @@ user=st.session_state.user
 with st.sidebar:
     st.image("logo_md.png",use_container_width=True)
     st.write(f"Utente: **{user['username']}**")
-    if st.button("Esci"): st.session_state.user=None;st.rerun()
+    if st.button("Esci"):
+        delete_browser_cookie(SESSION_COOKIE_NAME)
+        st.session_state.user=None
+        time.sleep(0.7)
+        st.rerun()
     pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
