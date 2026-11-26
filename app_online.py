@@ -977,22 +977,68 @@ def extract_pdf_text(pdf_bytes):
     except Exception as exc:
         return "",str(exc)
 
+def _find_first_value(lines, labels):
+    for line in lines:
+        low=line.casefold()
+        for label in labels:
+            key=label.casefold()
+            if key in low:
+                tail=line[low.find(key)+len(label):].strip(" :-–—")
+                if tail: return tail
+    return ""
+
+def _document_summary(extracted, document_type):
+    lines=[re.sub(r"\s+"," ",line).strip() for line in extracted.splitlines()]
+    lines=[line for line in lines if line]
+    stop_terms=("condizioni generali","foro competente","privacy","codice etico","gdpr","art. 30","art. 31")
+    commercial=[]
+    for line in lines:
+        if any(term in line.casefold() for term in stop_terms): break
+        commercial.append(line)
+    lines=commercial or lines[:120]
+    whole="\n".join(lines)
+    order_match=re.search(r"\bSO[0-9]+\b",whole,re.I)
+    ddt_match=re.search(r"\b(?:DDT[_ -]?)?[0-9]{3,}\b",whole,re.I)
+    date_match=re.search(r"\b(?:0?[1-9]|[12][0-9]|3[01])[./-](?:0?[1-9]|1[0-2])[./-](?:20)?[0-9]{2}\b",whole)
+    destination=_find_first_value(lines,["Destinazione","Destinatario","Luogo di consegna","Indirizzo di consegna","Ship to","Delivery address"])
+    customer=_find_first_value(lines,["Cliente","Customer","Ragione sociale"])
+    delivery=_find_first_value(lines,["Data consegna","Consegna prevista","Data prevista consegna","Delivery date"])
+    info={
+        "Numero ordine":order_match.group(0).upper() if order_match else "",
+        "Data":date_match.group(0) if date_match else "",
+        "Cliente":customer,
+        "Destinazione":destination,
+    }
+    if document_type=="ddt":
+        info={"Numero DDT":ddt_match.group(0) if ddt_match else "","Data":date_match.group(0) if date_match else "","Ordine di riferimento":order_match.group(0).upper() if order_match else "","Destinazione":destination}
+    elif delivery:
+        info["Consegna prevista"]=delivery
+    return info,lines
+
 def document_content_block(pdf_bytes,document_type):
     extracted,error=extract_pdf_text(pdf_bytes)
     title="Contenuto Conferma Ordine" if document_type=="conferma" else "Contenuto DDT"
     st.subheader(title)
     if error:
-        st.info("Non è stato possibile leggere automaticamente il contenuto di questo PDF. Il documento originale resta disponibile con Scarica PDF.")
-        return
+        st.info("Non è stato possibile leggere automaticamente il contenuto di questo PDF. Il documento originale resta disponibile con Scarica PDF.");return
     if not extracted:
-        st.info("Questo PDF non contiene testo estraibile automaticamente. Il documento originale resta disponibile con Scarica PDF.")
-        return
-    lines=[re.sub(r"\s+"," ",line).strip() for line in extracted.splitlines()]
-    lines=[line for line in lines if line]
-    if not lines:
-        st.info("Nessun contenuto testuale leggibile trovato nel PDF.")
-        return
-    st.text_area("Testo del documento",value="\n".join(lines),height=500,disabled=True,key=f"doc_text_{document_type}_{hash(extracted)}")
+        st.info("Questo PDF non contiene testo estraibile automaticamente. Il documento originale resta disponibile con Scarica PDF.");return
+    info,lines=_document_summary(extracted,document_type)
+    filled=[(k,v) for k,v in info.items() if v]
+    if filled:
+        cols=st.columns(min(len(filled),4))
+        for i,(label,value) in enumerate(filled): cols[i%len(cols)].metric(label,value)
+    # Mostra solo la parte commerciale precedente alle condizioni standard.
+    keywords=("codice","articolo","materiale","prodotto","descrizione","quant","q.t","prezzo","importo","totale","sconto","consegna","destin","ordine","ddt")
+    useful=[]
+    for line in lines:
+        low=line.casefold()
+        if any(k in low for k in keywords) or re.search(r"\b[A-Z0-9][A-Z0-9._/-]{3,}\b",line): useful.append(line)
+    if not useful: useful=lines[:40]
+    # Limita il riepilogo per evitare di riproporre pagine legali/contrattuali.
+    useful=useful[:80]
+    st.markdown("**Riepilogo commerciale del documento**")
+    st.text_area("Dati estratti",value="\n".join(useful),height=420,disabled=True,key=f"doc_summary_{document_type}_{hash(extracted)}")
 
 def document_archive_page(user,document_type):
     is_admin=user.get("role")=="admin";title="Conferme Ordine" if document_type=="conferma" else "DDT"
@@ -2160,4 +2206,3 @@ try:
     if found_code!=code: raise ValueError("Il dataset non corrisponde all'utente collegato.")
     dashboard(data,found_code,name);st.caption(f"Ultimo aggiornamento: {record['updated_at']}")
 except Exception as exc: st.error(f"Errore nella lettura dei dati: {exc}")
-
