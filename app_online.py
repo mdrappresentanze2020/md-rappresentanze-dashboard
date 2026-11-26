@@ -2301,19 +2301,24 @@ def ensure_customer_orders_tables():
         with connection.session as session:
             session.execute(text("""CREATE TABLE IF NOT EXISTS customer_pdf_orders(
                 id BIGSERIAL PRIMARY KEY,customer_code TEXT NOT NULL,reference TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',
-                filename TEXT NOT NULL,content BYTEA NOT NULL,status TEXT NOT NULL DEFAULT 'Ricevuto',created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+                catalog TEXT NOT NULL DEFAULT 'HOME / SPLIT',filename TEXT NOT NULL,content BYTEA NOT NULL,status TEXT NOT NULL DEFAULT 'Ricevuto',created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+            session.execute(text("ALTER TABLE customer_pdf_orders ADD COLUMN IF NOT EXISTS catalog TEXT NOT NULL DEFAULT 'HOME / SPLIT'"))
+            session.execute(text("""CREATE TABLE IF NOT EXISTS order_price_lists(
+                catalog TEXT NOT NULL,product_code TEXT NOT NULL,model TEXT NOT NULL DEFAULT '',description TEXT NOT NULL DEFAULT '',
+                list_price NUMERIC NOT NULL DEFAULT 0,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(catalog,product_code))"""))
             session.execute(text("""CREATE TABLE IF NOT EXISTS xml_product_codes(
                 source_code TEXT PRIMARY KEY,product_code TEXT NOT NULL DEFAULT '',commercial_code TEXT NOT NULL DEFAULT '',
                 position_prefix TEXT NOT NULL DEFAULT '',group_name TEXT NOT NULL DEFAULT 'Group1',updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
             session.commit()
     return run_db_with_retry(operation)
 
-def save_customer_pdf_order(code,reference,notes,filename,content):
+def save_customer_pdf_order(code,reference,notes,catalog,filename,content):
     ensure_customer_orders_tables()
     def operation(connection):
         with connection.session as session:
-            row=session.execute(text("""INSERT INTO customer_pdf_orders(customer_code,reference,notes,filename,content)
-                VALUES(:code,:reference,:notes,:filename,:content) RETURNING id"""),{"code":code,"reference":reference,"notes":notes,"filename":filename,"content":content}).first()
+            row=session.execute(text("""INSERT INTO customer_pdf_orders(customer_code,reference,notes,catalog,filename,content)
+                VALUES(:code,:reference,:notes,:catalog,:filename,:content) RETURNING id"""),{"code":code,"reference":reference,"notes":notes,"catalog":catalog,"filename":filename,"content":content}).first()
             session.commit();return int(row[0])
     return run_db_with_retry(operation)
 
@@ -2322,8 +2327,8 @@ def load_customer_pdf_orders(code=None):
     def operation(connection):
         with connection.session as session:
             if code:
-                return session.execute(text("SELECT id,customer_code,reference,notes,filename,content,status,created_at FROM customer_pdf_orders WHERE customer_code=:code ORDER BY created_at DESC"),{"code":code}).mappings().all()
-            return session.execute(text("SELECT id,customer_code,reference,notes,filename,content,status,created_at FROM customer_pdf_orders ORDER BY created_at DESC")).mappings().all()
+                return session.execute(text("SELECT id,customer_code,reference,notes,catalog,filename,content,status,created_at FROM customer_pdf_orders WHERE customer_code=:code ORDER BY created_at DESC"),{"code":code}).mappings().all()
+            return session.execute(text("SELECT id,customer_code,reference,notes,catalog,filename,content,status,created_at FROM customer_pdf_orders ORDER BY created_at DESC")).mappings().all()
     return run_db_with_retry(operation)
 
 def load_xml_mappings():
@@ -2381,6 +2386,56 @@ def build_order_xml(rows,external_quote):
     ET.indent(root,space='    ')
     return ET.tostring(root,encoding='utf-8',xml_declaration=False)
 
+def import_order_price_list(catalog,uploaded_file):
+    ensure_customer_orders_tables()
+    raw=uploaded_file.getvalue()
+    preview=pd.read_excel(io.BytesIO(raw),header=None,engine='openpyxl')
+    rows=[]
+    if catalog=='VRF':
+        for _,r in preview.iterrows():
+            model=str(r.iloc[0]).strip() if len(r)>0 and pd.notna(r.iloc[0]) else ''
+            code=str(r.iloc[1]).strip().replace('.0','') if len(r)>1 and pd.notna(r.iloc[1]) else ''
+            try: price=float(r.iloc[2])
+            except Exception: continue
+            if re.fullmatch(r'\d{6,12}',code): rows.append((code,model,model,price))
+    else:
+        data=pd.read_excel(io.BytesIO(raw),engine='openpyxl')
+        for _,r in data.iterrows():
+            code=str(r.get('CodArt','')).strip().replace('.0','')
+            if not re.fullmatch(r'\d{6,12}',code): continue
+            model=str(r.get('DesArt1','') or '').strip()
+            description=str(r.get('DesArt2+DescEst','') or '').strip()
+            try: price=float(r.get('PrezzoListino',0) or 0)
+            except Exception: price=0.0
+            rows.append((code,model,description,price))
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text('DELETE FROM order_price_lists WHERE catalog=:catalog'),{'catalog':catalog})
+            for code,model,description,price in rows:
+                session.execute(text("""INSERT INTO order_price_lists(catalog,product_code,model,description,list_price,updated_at)
+                    VALUES(:catalog,:code,:model,:description,:price,CURRENT_TIMESTAMP)"""),
+                    {'catalog':catalog,'code':code,'model':model,'description':description,'price':price})
+            session.commit()
+    run_db_with_retry(operation);return len(rows)
+
+def load_order_price_list(catalog):
+    ensure_customer_orders_tables()
+    def operation(connection):
+        with connection.session as session:
+            rows=session.execute(text('SELECT product_code,model,description,list_price FROM order_price_lists WHERE catalog=:catalog'),{'catalog':catalog}).mappings().all()
+            return {str(r['product_code']):dict(r) for r in rows}
+    return run_db_with_retry(operation)
+
+def price_lists_admin_page():
+    st.title('Gestione listini ordini')
+    st.caption('Carica il listino HOME / SPLIT o VRF. APPLIED resta a compilazione manuale.')
+    catalog=st.selectbox('Catalogo',['HOME / SPLIT','VRF'])
+    uploaded=st.file_uploader('Listino Excel',type=['xlsx'],key='price_list_upload')
+    if st.button('Importa listino',type='primary',use_container_width=True,disabled=uploaded is None):
+        count=import_order_price_list(catalog,uploaded);st.success(f'Importati {count} articoli nel catalogo {catalog}.')
+    current=load_order_price_list(catalog)
+    st.metric('Articoli disponibili',len(current))
+
 def delete_customer_pdf_order(order_id, customer_code=None):
     ensure_customer_orders_tables()
     def operation(connection):
@@ -2399,7 +2454,7 @@ def send_order_page(user):
         st.title('Ordini Clienti')
         orders=load_customer_pdf_orders()
         if not orders: st.info('Nessun ordine cliente caricato.');return
-        labels={f"{CLIENTS.get(r['customer_code'],{}).get('name',r['customer_code'])} · {r['reference'] or r['filename']} · {r['created_at']}":r for r in orders}
+        labels={f"{CLIENTS.get(r['customer_code'],{}).get('name',r['customer_code'])} · {r.get('catalog','HOME / SPLIT')} · {r['reference'] or r['filename']} · {r['created_at']}":r for r in orders}
         selected=labels[st.selectbox('Ordine',list(labels.keys()))]
         st.download_button('Scarica PDF ordine',bytes(selected['content']),selected['filename'],'application/pdf',use_container_width=True)
         confirm_admin=st.checkbox('Confermo di voler cancellare definitivamente questo ordine',key=f"admin_delete_confirm_{selected['id']}")
@@ -2411,6 +2466,7 @@ def send_order_page(user):
     st.title('Invia Ordine')
     st.caption('Carica l’ordine cliente in PDF. Il documento resta associato al tuo account.')
     with st.form('customer_order_upload'):
+        catalog=st.radio('Catalogo di riferimento',['HOME / SPLIT','VRF','APPLIED'],horizontal=True)
         reference=st.text_input('Riferimento ordine cliente')
         notes=st.text_area('Note')
         uploaded=st.file_uploader('Ordine in PDF',type=['pdf'])
@@ -2418,12 +2474,12 @@ def send_order_page(user):
     if submitted:
         if not uploaded: st.error('Seleziona un file PDF.')
         else:
-            save_customer_pdf_order(code,reference.strip(),notes.strip(),uploaded.name,uploaded.getvalue())
+            save_customer_pdf_order(code,reference.strip(),notes.strip(),catalog,uploaded.name,uploaded.getvalue())
             st.success('Ordine caricato correttamente.');st.rerun()
     orders=load_customer_pdf_orders(code)
     if orders:
         st.subheader('Storico ordini inviati')
-        st.dataframe(pd.DataFrame([{'Data':r['created_at'],'Riferimento':r['reference'],'File':r['filename'],'Stato':r['status']} for r in orders]),use_container_width=True,hide_index=True)
+        st.dataframe(pd.DataFrame([{'Data':r['created_at'],'Catalogo':r.get('catalog','HOME / SPLIT'),'Riferimento':r['reference'],'File':r['filename'],'Stato':r['status']} for r in orders]),use_container_width=True,hide_index=True)
         choices={f"{r['reference'] or r['filename']} · {r['created_at']}":r for r in orders}
         selected_order=choices[st.selectbox('Seleziona ordine da cancellare',list(choices.keys()),key='client_delete_order_select')]
         confirm_client=st.checkbox('Confermo di voler cancellare definitivamente questo ordine',key=f"client_delete_confirm_{selected_order['id']}")
@@ -2431,53 +2487,74 @@ def send_order_page(user):
             delete_customer_pdf_order(selected_order['id'],code)
             st.success('Ordine cancellato definitivamente.');st.rerun()
 
+def _normalize_search(value):
+    return re.sub(r'[^A-Z0-9]','',str(value or '').upper())
+
+def enrich_order_rows(pdf_bytes,catalog):
+    text_value,error=extract_pdf_text(pdf_bytes)
+    if error or not text_value: return [],error or 'Testo non estraibile'
+    price_list=load_order_price_list(catalog) if catalog!='APPLIED' else {}
+    upper=text_value.upper();found={}
+    # Prima cerca tutti i codici numerici esatti del listino nel PDF.
+    for code,item in price_list.items():
+        hits=len(re.findall(rf'(?<!\d){re.escape(code)}(?!\d)',upper))
+        if hits: found[code]={'Codice prodotto':code,'Descrizione':item.get('model') or item.get('description') or '','Quantità':hits,'Prezzo listino':float(item.get('list_price') or 0)}
+    # Se il PDF usa il modello/descrizione, cerca corrispondenze normalizzate sufficientemente lunghe.
+    if not found and price_list:
+        normalized_text=_normalize_search(upper)
+        for code,item in price_list.items():
+            model=str(item.get('model') or '').strip()
+            key=_normalize_search(model)
+            if len(key)>=6 and key in normalized_text:
+                found[code]={'Codice prodotto':code,'Descrizione':model or item.get('description') or '','Quantità':1,'Prezzo listino':float(item.get('list_price') or 0)}
+    if catalog=='APPLIED':
+        # Per APPLIED proponi righe descrittive modificabili, senza inventare codici.
+        useful=[]
+        for line in text_value.splitlines():
+            line=re.sub(r'\s+',' ',line).strip()
+            if len(line)>=6 and re.search(r'[A-Za-z]',line) and re.search(r'\d',line):
+                useful.append({'Codice prodotto':'','Descrizione':line[:180],'Quantità':1,'Prezzo listino':0.0})
+        return useful[:40],None
+    return list(found.values()),None
+
 def order_codes_page():
     st.title('Codici Ordine')
-    st.caption('Estrai i codici dal PDF, correggi la tabella e copia i dati nel programma Clivet.')
+    st.caption('Il catalogo scelto dal cliente limita la ricerca al listino corretto. Per APPLIED codici e prezzi restano manuali.')
     orders=load_customer_pdf_orders()
-    if not orders:
-        st.info('Nessun ordine cliente disponibile.');return
-    labels={f"{CLIENTS.get(r['customer_code'],{}).get('name',r['customer_code'])} · {r['reference'] or r['filename']}":r for r in orders}
+    if not orders: st.info('Nessun ordine cliente disponibile.');return
+    labels={f"{CLIENTS.get(r['customer_code'],{}).get('name',r['customer_code'])} · {r.get('catalog','HOME / SPLIT')} · {r['reference'] or r['filename']}":r for r in orders}
     selected=labels[st.selectbox('Ordine cliente',list(labels.keys()),key='codes_order_select')]
-    detected,error=extract_order_rows(bytes(selected['content']))
+    catalog=selected.get('catalog') or 'HOME / SPLIT'
+    st.info(f'Catalogo selezionato dal cliente: {catalog}')
+    detected,error=enrich_order_rows(bytes(selected['content']),catalog)
     if error: st.warning(error)
     if not detected:
-        detected=[{'Codice prodotto':'','Quantità':1}]
-        st.info('Nessun codice riconosciuto automaticamente. Puoi inserirli manualmente nella tabella.')
-    st.markdown('**Controlla e correggi codici e quantità**')
-    edited=st.data_editor(
-        pd.DataFrame(detected,columns=['Codice prodotto','Quantità']),
-        num_rows='dynamic',use_container_width=True,key=f"codes_editor_{selected['id']}",
-        column_config={
-            'Codice prodotto':st.column_config.TextColumn('Codice prodotto',required=True),
-            'Quantità':st.column_config.NumberColumn('Quantità',min_value=1,step=1,required=True),
-        }
-    )
+        detected=[{'Codice prodotto':'','Descrizione':'','Quantità':1,'Prezzo listino':0.0}]
+        st.info('Nessuna corrispondenza automatica. Inserisci o correggi manualmente i dati.')
+    edited=st.data_editor(pd.DataFrame(detected),num_rows='dynamic',use_container_width=True,key=f"codes_editor_{selected['id']}",
+        column_config={'Codice prodotto':st.column_config.TextColumn('Codice prodotto'),'Descrizione':st.column_config.TextColumn('Descrizione'),'Quantità':st.column_config.NumberColumn('Quantità',min_value=1,step=1,required=True),'Prezzo listino':st.column_config.NumberColumn('Prezzo listino',min_value=0.0,step=1.0,format='€ %.2f')})
     records=[]
     for row in edited.to_dict('records'):
-        code=str(row.get('Codice prodotto','')).strip().upper()
-        try: qty=int(row.get('Quantità',1) or 1)
+        code=str(row.get('Codice prodotto','')).strip();desc=str(row.get('Descrizione','')).strip()
+        try: qty=max(int(row.get('Quantità',1) or 1),1)
         except Exception: qty=1
-        if code: records.append({'Codice prodotto':code,'Quantità':max(qty,1)})
-    if not records:
-        st.warning('Inserisci almeno un codice prodotto.');return
-    only_codes='\n'.join(r['Codice prodotto'] for r in records)
-    code_qty='\n'.join(f"{r['Codice prodotto']}\t{r['Quantità']}" for r in records)
-    csv_bytes=pd.DataFrame(records).to_csv(index=False,sep=';').encode('utf-8-sig')
-    tab1,tab2,tab3=st.tabs(['Solo codici','Codice + quantità','Excel / CSV'])
-    with tab1:
-        st.caption('Usa il pulsante Copia nell’angolo del riquadro.')
-        st.code(only_codes,language=None)
-        st.download_button('Scarica TXT solo codici',only_codes.encode('utf-8'),file_name=f"codici_ordine_{selected['id']}.txt",mime='text/plain',use_container_width=True)
-    with tab2:
-        st.caption('Codice e quantità sono separati da TAB, pronti da incollare su due colonne.')
-        st.code(code_qty,language=None)
-        st.download_button('Scarica TXT codice + quantità',code_qty.encode('utf-8'),file_name=f"codici_quantita_{selected['id']}.txt",mime='text/plain',use_container_width=True)
-    with tab3:
-        st.dataframe(pd.DataFrame(records),use_container_width=True,hide_index=True)
+        try: price=max(float(row.get('Prezzo listino',0) or 0),0)
+        except Exception: price=0.0
+        if code or desc: records.append({'Codice prodotto':code,'Descrizione':desc,'Quantità':qty,'Prezzo listino':price,'Totale listino':price*qty})
+    if not records: st.warning('Inserisci almeno una riga.');return
+    export_df=pd.DataFrame(records)
+    codes='\n'.join(r['Codice prodotto'] for r in records if r['Codice prodotto'])
+    code_qty='\n'.join(f"{r['Codice prodotto']}\t{r['Quantità']}" for r in records if r['Codice prodotto'])
+    complete='\n'.join(f"{r['Codice prodotto']}\t{r['Descrizione']}\t{r['Quantità']}\t{r['Prezzo listino']:.2f}" for r in records)
+    csv_bytes=export_df.to_csv(index=False,sep=';').encode('utf-8-sig')
+    tab1,tab2,tab3,tab4=st.tabs(['Solo codici','Codice + quantità','Completo','Excel / CSV'])
+    with tab1: st.code(codes or 'Nessun codice inserito',language=None)
+    with tab2: st.code(code_qty or 'Nessun codice inserito',language=None)
+    with tab3: st.code(complete,language=None)
+    with tab4:
+        st.dataframe(export_df,use_container_width=True,hide_index=True)
         st.download_button('Scarica CSV',csv_bytes,file_name=f"codici_ordine_{selected['id']}.csv",mime='text/csv',type='primary',use_container_width=True)
-    with st.expander('Anteprima PDF ordine'):
-        pdf_image_preview(bytes(selected['content']),'ordine_codici')
+    with st.expander('Anteprima PDF ordine'): pdf_image_preview(bytes(selected['content']),'ordine_codici')
 
 def targets_page():
     st.title("Target annuali")
@@ -2570,7 +2647,7 @@ with st.sidebar:
         st.session_state.user=None
         time.sleep(0.7)
         st.rerun()
-    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Ordini Clienti","Codici Ordine","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
+    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Ordini Clienti","Codici Ordine","Gestione listini ordini","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
@@ -2579,6 +2656,7 @@ if page=="DDT": document_archive_page(user,"ddt");st.stop()
 if page=="Invia Ordine": send_order_page(user);st.stop()
 if page=="Ordini Clienti": send_order_page(user);st.stop()
 if page=="Codici Ordine": order_codes_page();st.stop()
+if page=="Gestione listini ordini": price_lists_admin_page();st.stop()
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
