@@ -987,6 +987,54 @@ def _find_first_value(lines, labels):
                 if tail: return tail
     return ""
 
+def _after_heading(lines, headings, max_lines=3):
+    for i,line in enumerate(lines):
+        low=line.casefold().strip()
+        for heading in headings:
+            h=heading.casefold()
+            if low==h or low.startswith(h+":"):
+                inline=line[len(heading):].strip(" :-–—")
+                values=[]
+                if inline: values.append(inline)
+                for nxt in lines[i+1:i+1+max_lines]:
+                    if re.match(r"^[A-ZÀ-Ü][A-ZÀ-Ü /'._-]{2,}$",nxt) and len(values)>0: break
+                    values.append(nxt)
+                return " ".join(v for v in values if v).strip()
+    return ""
+
+def _clivet_guess_parties(lines):
+    destination=_after_heading(lines,["INDIRIZZO DI SPEDIZIONE","SHIP TO","DESTINAZIONE"],4)
+    customer=_after_heading(lines,["CLIENTE","CUSTOMER"],4)
+    # Fallback for PDFs whose table extraction loses the headings/columns.
+    if not customer:
+        candidates=[]
+        for line in lines[:45]:
+            u=line.upper()
+            if any(x in u for x in ("CLIVET S.P.A","CONFERMA D'ORDINE","BANCA","IBAN","MD RAPPRESENTANZE","FELTRE - BELLUNO")): continue
+            if re.search(r"\b(?:SRL|S\.R\.L\.|SPA|S\.P\.A\.|SAS|S\.A\.S\.)\b",u): candidates.append(line)
+        if candidates: customer=candidates[-1]
+    if not destination:
+        for line in lines[:55]:
+            u=line.upper()
+            if " - ITALY" in u and ("VIA " in u or "VIA," in u) and "VILLAPAIERA" not in u:
+                destination=line;break
+    return customer,destination
+
+def _clivet_product_lines(lines):
+    start=0
+    for i,line in enumerate(lines):
+        if any(k in line.casefold() for k in ("descrizione articolo","prezzo unitario","importo totale")):
+            start=i;break
+    selected=[]
+    for line in lines[start:start+120]:
+        low=line.casefold()
+        if any(k in low for k in ("condizioni generali","privacy","foro competente","codice etico")): break
+        if re.search(r"\[[0-9]{5,}\]",line) or any(k in low for k in ("quantità","prezzo unitario","importo totale","consegna","freight","trasporto","totale eur","raee","descrizione articolo")):
+            selected.append(line)
+        elif selected and (re.search(r"\b\d+[.,]\d{1,2}\b",line) or "codice configurato" in low or "origine/origin" in low or "garanzia" in low):
+            selected.append(line)
+    return selected
+
 def _document_summary(extracted, document_type):
     lines=[re.sub(r"\s+"," ",line).strip() for line in extracted.splitlines()]
     lines=[line for line in lines if line]
@@ -1002,6 +1050,9 @@ def _document_summary(extracted, document_type):
     date_match=re.search(r"\b(?:0?[1-9]|[12][0-9]|3[01])[./-](?:0?[1-9]|1[0-2])[./-](?:20)?[0-9]{2}\b",whole)
     destination=_find_first_value(lines,["Destinazione","Destinatario","Luogo di consegna","Indirizzo di consegna","Ship to","Delivery address"])
     customer=_find_first_value(lines,["Cliente","Customer","Ragione sociale"])
+    guessed_customer,guessed_destination=_clivet_guess_parties(lines)
+    customer=customer or guessed_customer
+    destination=destination or guessed_destination
     delivery=_find_first_value(lines,["Data consegna","Consegna prevista","Data prevista consegna","Delivery date"])
     info={
         "Numero ordine":order_match.group(0).upper() if order_match else "",
@@ -1030,12 +1081,13 @@ def document_content_block(pdf_bytes,document_type):
         for i,(label,value) in enumerate(filled): cols[i%len(cols)].metric(label,value)
     # Mostra solo la parte commerciale precedente alle condizioni standard.
     keywords=("codice","articolo","materiale","prodotto","descrizione","quant","q.t","prezzo","importo","totale","sconto","consegna","destin","ordine","ddt")
-    useful=[]
-    for line in lines:
-        low=line.casefold()
-        if any(k in low for k in keywords) or re.search(r"\b[A-Z0-9][A-Z0-9._/-]{3,}\b",line): useful.append(line)
+    useful=_clivet_product_lines(lines)
+    if not useful:
+        useful=[]
+        for line in lines:
+            low=line.casefold()
+            if any(k in low for k in keywords) or re.search(r"\b[A-Z0-9][A-Z0-9._/-]{3,}\b",line): useful.append(line)
     if not useful: useful=lines[:40]
-    # Limita il riepilogo per evitare di riproporre pagine legali/contrattuali.
     useful=useful[:80]
     st.markdown("**Riepilogo commerciale del documento**")
     if document_type=="conferma":
