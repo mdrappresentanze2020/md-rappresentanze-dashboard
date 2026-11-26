@@ -36,6 +36,12 @@ html,body,button,input,textarea,select,[data-testid="stMetric"],[data-testid="st
 [data-testid="stSidebarCollapseButton"] button:hover{background:#fff1f2!important;border:0!important}
 [data-testid="stSidebarCollapseButton"] span,
 [data-testid="stSidebarCollapseButton"] svg{font-family:"Material Symbols Rounded","Material Symbols Outlined"!important;color:#d63f4f!important;fill:#d63f4f!important;-webkit-text-fill-color:#d63f4f!important}
+/* Icona per riaprire il menu quando la sidebar e chiusa. */
+[data-testid="stSidebarCollapsedControl"]{display:flex!important;visibility:visible!important;opacity:1!important;position:fixed!important;left:10px!important;top:12px!important;z-index:1000000!important}
+[data-testid="stSidebarCollapsedControl"] button{display:flex!important;visibility:visible!important;opacity:1!important;background:#ffffff!important;border:2px solid #d63f4f!important;border-radius:9px!important;box-shadow:0 2px 8px rgba(0,0,0,.18)!important;width:42px!important;height:42px!important;padding:7px!important}
+[data-testid="stSidebarCollapsedControl"] button:hover{background:#fff1f2!important;border-color:#b92f3f!important}
+[data-testid="stSidebarCollapsedControl"] span,
+[data-testid="stSidebarCollapsedControl"] svg{font-family:"Material Symbols Rounded","Material Symbols Outlined"!important;color:#d63f4f!important;fill:#d63f4f!important;-webkit-text-fill-color:#d63f4f!important;font-size:27px!important}
 /* Testo sempre bianco in tutti i pulsanti/riquadri a sfondo scuro */
 button[kind="primary"],button[kind="secondary"],div[data-testid="stFormSubmitButton"] button,.stButton button{color:#ffffff!important}
 button[kind="primary"] *,button[kind="secondary"] *,div[data-testid="stFormSubmitButton"] button *,.stButton button *{color:#ffffff!important}
