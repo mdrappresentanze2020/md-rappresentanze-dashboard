@@ -7,6 +7,7 @@ import base64
 import urllib.parse
 import urllib.request
 import time
+import xml.etree.ElementTree as ET
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -2294,6 +2295,144 @@ def benefits_summary_page(user):
         st.dataframe(pd.DataFrame(prize_rows),use_container_width=True,hide_index=True)
     st.caption("Il netto finale per prodotto è una simulazione: al netto delle promozioni prodotto, degli omaggi ripartiti e dei premi percentuali selezionati nello scenario. I premi definitivi restano soggetti alle condizioni dell'accordo commerciale.")
 
+
+def ensure_customer_orders_tables():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS customer_pdf_orders(
+                id BIGSERIAL PRIMARY KEY,customer_code TEXT NOT NULL,reference TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',
+                filename TEXT NOT NULL,content BYTEA NOT NULL,status TEXT NOT NULL DEFAULT 'Ricevuto',created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+            session.execute(text("""CREATE TABLE IF NOT EXISTS xml_product_codes(
+                source_code TEXT PRIMARY KEY,product_code TEXT NOT NULL DEFAULT '',commercial_code TEXT NOT NULL DEFAULT '',
+                position_prefix TEXT NOT NULL DEFAULT '',group_name TEXT NOT NULL DEFAULT 'Group1',updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def save_customer_pdf_order(code,reference,notes,filename,content):
+    ensure_customer_orders_tables()
+    def operation(connection):
+        with connection.session as session:
+            row=session.execute(text("""INSERT INTO customer_pdf_orders(customer_code,reference,notes,filename,content)
+                VALUES(:code,:reference,:notes,:filename,:content) RETURNING id"""),{"code":code,"reference":reference,"notes":notes,"filename":filename,"content":content}).first()
+            session.commit();return int(row[0])
+    return run_db_with_retry(operation)
+
+def load_customer_pdf_orders(code=None):
+    ensure_customer_orders_tables()
+    def operation(connection):
+        with connection.session as session:
+            if code:
+                return session.execute(text("SELECT id,customer_code,reference,notes,filename,content,status,created_at FROM customer_pdf_orders WHERE customer_code=:code ORDER BY created_at DESC"),{"code":code}).mappings().all()
+            return session.execute(text("SELECT id,customer_code,reference,notes,filename,content,status,created_at FROM customer_pdf_orders ORDER BY created_at DESC")).mappings().all()
+    return run_db_with_retry(operation)
+
+def load_xml_mappings():
+    ensure_customer_orders_tables()
+    def operation(connection):
+        with connection.session as session:
+            rows=session.execute(text("SELECT source_code,product_code,commercial_code,position_prefix,group_name FROM xml_product_codes ORDER BY source_code")).mappings().all()
+            return {r['source_code']:dict(r) for r in rows}
+    return run_db_with_retry(operation)
+
+def save_xml_mappings(rows):
+    ensure_customer_orders_tables()
+    def operation(connection):
+        with connection.session as session:
+            for row in rows:
+                source=str(row.get('Codice rilevato','')).strip().upper()
+                if not source: continue
+                session.execute(text("""INSERT INTO xml_product_codes(source_code,product_code,commercial_code,position_prefix,group_name,updated_at)
+                    VALUES(:source,:product,:commercial,:position,:group_name,CURRENT_TIMESTAMP)
+                    ON CONFLICT(source_code) DO UPDATE SET product_code=:product,commercial_code=:commercial,position_prefix=:position,group_name=:group_name,updated_at=CURRENT_TIMESTAMP"""),{
+                    'source':source,'product':str(row.get('productCode','')).strip(),'commercial':str(row.get('commercialCode','')).strip(),
+                    'position':str(row.get('Prefisso posizione','')).strip().upper(),'group_name':str(row.get('group','Group1')).strip() or 'Group1'})
+            session.commit()
+    return run_db_with_retry(operation)
+
+def extract_order_rows(pdf_bytes):
+    extracted,error=extract_pdf_text(pdf_bytes)
+    if error or not extracted: return [],error or 'Testo non estraibile'
+    found={}
+    for raw in extracted.splitlines():
+        line=re.sub(r'\s+',' ',raw).strip()
+        # Codici tecnici alfanumerici e quantità vicina. La tabella rimane sempre modificabile.
+        codes=re.findall(r'\b(?=[A-Z0-9._/-]{5,}\b)(?=[A-Z0-9._/-]*[A-Z])(?=[A-Z0-9._/-]*\d)[A-Z0-9][A-Z0-9._/-]+\b',line.upper())
+        nums=re.findall(r'(?<![A-Z0-9])([1-9][0-9]{0,3})(?![A-Z0-9])',line.upper())
+        qty=int(nums[-1]) if nums else 1
+        for code in codes:
+            if code.startswith(('SO','DDT')) or code in ('CLIVET','GROUP1'): continue
+            found[code]=found.get(code,0)+qty
+    return [{'Codice rilevato':k,'Quantità':v} for k,v in found.items()],None
+
+def build_order_xml(rows,external_quote):
+    root=ET.Element('rows',{'externalQuoteNumber':external_quote or '/2026','application':'MDV_VRF_SELECT_BASE'})
+    counters={}
+    for row in rows:
+        qty=int(row.get('Quantità',0) or 0)
+        if qty<=0: continue
+        attrs={'commercialCode':str(row.get('commercialCode','')).strip(),'productCode':str(row.get('productCode','')).strip(),'quantity':str(qty)}
+        prefix=str(row.get('Prefisso posizione','')).strip().upper()
+        if prefix:
+            counters[prefix]=counters.get(prefix,0)+1;attrs['position']=f"{prefix}{counters[prefix]}"
+        attrs['group']=str(row.get('group','Group1')).strip() or 'Group1'
+        ET.SubElement(root,'row',attrs)
+    ET.indent(root,space='    ')
+    return ET.tostring(root,encoding='utf-8',xml_declaration=False)
+
+def send_order_page(user):
+    is_admin=user.get('role')=='admin'
+    code=str(user.get('customer_code') or user.get('code') or '').strip().upper()
+    if is_admin:
+        st.title('Ordini Clienti')
+        orders=load_customer_pdf_orders()
+        if not orders: st.info('Nessun ordine cliente caricato.');return
+        labels={f"{CLIENTS.get(r['customer_code'],{}).get('name',r['customer_code'])} · {r['reference'] or r['filename']} · {r['created_at']}":r for r in orders}
+        selected=labels[st.selectbox('Ordine',list(labels.keys()))]
+        st.download_button('Scarica PDF ordine',bytes(selected['content']),selected['filename'],'application/pdf',use_container_width=True)
+        pdf_image_preview(bytes(selected['content']),'ordine_cliente')
+        return
+    st.title('Invia Ordine')
+    st.caption('Carica l’ordine cliente in PDF. Il documento resta associato al tuo account.')
+    with st.form('customer_order_upload'):
+        reference=st.text_input('Riferimento ordine cliente')
+        notes=st.text_area('Note')
+        uploaded=st.file_uploader('Ordine in PDF',type=['pdf'])
+        submitted=st.form_submit_button('Invia ordine',type='primary',use_container_width=True)
+    if submitted:
+        if not uploaded: st.error('Seleziona un file PDF.')
+        else:
+            save_customer_pdf_order(code,reference.strip(),notes.strip(),uploaded.name,uploaded.getvalue())
+            st.success('Ordine caricato correttamente.');st.rerun()
+    orders=load_customer_pdf_orders(code)
+    if orders:
+        st.subheader('Storico ordini inviati')
+        st.dataframe(pd.DataFrame([{'Data':r['created_at'],'Riferimento':r['reference'],'File':r['filename'],'Stato':r['status']} for r in orders]),use_container_width=True,hide_index=True)
+
+def xml_orders_page():
+    st.title('Ordini PDF → XML')
+    orders=load_customer_pdf_orders()
+    if not orders: st.info('Nessun ordine cliente disponibile.');return
+    labels={f"{CLIENTS.get(r['customer_code'],{}).get('name',r['customer_code'])} · {r['reference'] or r['filename']}":r for r in orders}
+    selected=labels[st.selectbox('Ordine cliente',list(labels.keys()),key='xml_order_select')]
+    detected,error=extract_order_rows(bytes(selected['content']))
+    if error: st.warning(error)
+    mappings=load_xml_mappings();rows=[]
+    for item in detected:
+        mapping=mappings.get(item['Codice rilevato'],{})
+        rows.append({**item,'productCode':mapping.get('product_code',''),'commercialCode':mapping.get('commercial_code',''),'Prefisso posizione':mapping.get('position_prefix',''),'group':mapping.get('group_name','Group1')})
+    st.caption('Correggi codici e quantità prima di generare l’XML. Le associazioni salvate saranno riutilizzate nei prossimi ordini.')
+    edited=st.data_editor(pd.DataFrame(rows,columns=['Codice rilevato','productCode','commercialCode','Quantità','Prefisso posizione','group']),num_rows='dynamic',use_container_width=True,key=f"xml_editor_{selected['id']}")
+    external=st.text_input('externalQuoteNumber',value='/2026')
+    c1,c2=st.columns(2)
+    if c1.button('Salva anagrafica codici',use_container_width=True):
+        save_xml_mappings(edited.to_dict('records'));st.success('Anagrafica aggiornata.')
+    records=edited.to_dict('records')
+    incomplete=[r for r in records if not str(r.get('productCode','')).strip() or not str(r.get('commercialCode','')).strip()]
+    if incomplete: st.warning(f"Completa productCode e commercialCode per {len(incomplete)} righe prima di generare l’XML.")
+    else:
+        xml_bytes=build_order_xml(records,external.strip())
+        st.download_button('Genera e scarica XML',xml_bytes,file_name=f"ordine_{selected['id']}.xml",mime='application/xml',type='primary',use_container_width=True)
+
 def targets_page():
     st.title("Target annuali")
     st.caption("I valori vengono salvati su Neon e restano invariati finché non vengono modificati dall'amministratore.")
@@ -2385,12 +2524,15 @@ with st.sidebar:
         st.session_state.user=None
         time.sleep(0.7)
         st.rerun()
-    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
+    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Ordini Clienti","Ordini PDF → XML","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
 if page=="Conferme Ordine": document_archive_page(user,"conferma");st.stop()
 if page=="DDT": document_archive_page(user,"ddt");st.stop()
+if page=="Invia Ordine": send_order_page(user);st.stop()
+if page=="Ordini Clienti": send_order_page(user);st.stop()
+if page=="Ordini PDF → XML": xml_orders_page();st.stop()
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
