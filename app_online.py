@@ -31,6 +31,11 @@ html,body,button,input,textarea,select,[data-testid="stMetric"],[data-testid="st
 [data-testid="stSidebar"] button{background:#2f2f2f!important;border:1px solid #2f2f2f!important}
 [data-testid="stSidebar"] button p,[data-testid="stSidebar"] button span,[data-testid="stSidebar"] button div{color:#ffffff!important;font-weight:700!important}
 [data-testid="stSidebar"] button:hover{background:#087dac!important;border-color:#087dac!important}
+/* Pulsante di chiusura/apertura sidebar: ripristina l'icona Material e la rende rossa. */
+[data-testid="stSidebarCollapseButton"] button{background:transparent!important;border:0!important;box-shadow:none!important}
+[data-testid="stSidebarCollapseButton"] button:hover{background:#fff1f2!important;border:0!important}
+[data-testid="stSidebarCollapseButton"] span,
+[data-testid="stSidebarCollapseButton"] svg{font-family:"Material Symbols Rounded","Material Symbols Outlined"!important;color:#d63f4f!important;fill:#d63f4f!important;-webkit-text-fill-color:#d63f4f!important}
 /* Testo sempre bianco in tutti i pulsanti/riquadri a sfondo scuro */
 button[kind="primary"],button[kind="secondary"],div[data-testid="stFormSubmitButton"] button,.stButton button{color:#ffffff!important}
 button[kind="primary"] *,button[kind="secondary"] *,div[data-testid="stFormSubmitButton"] button *,.stButton button *{color:#ffffff!important}
