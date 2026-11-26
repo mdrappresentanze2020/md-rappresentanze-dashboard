@@ -2543,7 +2543,7 @@ def send_order_page(user):
         return
     st.title('Invia Ordine')
     st.caption('Carica l’ordine cliente in PDF. Il documento resta associato al tuo account.')
-    order_notice=st.session_state.pop('order_notification_notice',None)
+    order_notice=st.session_state.get('order_notification_notice')
     if order_notice:
         notice_type,notice_text=order_notice
         if notice_type=='success': st.success(notice_text)
@@ -2566,6 +2566,11 @@ def send_order_page(user):
             st.rerun()
     orders=load_customer_pdf_orders(code)
     if orders:
+        order_notice=st.session_state.get('order_notification_notice')
+        if order_notice:
+            notice_type,notice_text=order_notice
+            if notice_type=='success': st.success(notice_text)
+            else: st.warning(notice_text)
         st.subheader('Storico ordini inviati')
         st.dataframe(pd.DataFrame([{'Data':r['created_at'],'Catalogo':r.get('catalog','HOME / SPLIT'),'Riferimento':r['reference'],'File':r['filename'],'Stato':r['status']} for r in orders]),use_container_width=True,hide_index=True)
         choices={f"{r['reference'] or r['filename']} · {r['created_at']}":r for r in orders}
