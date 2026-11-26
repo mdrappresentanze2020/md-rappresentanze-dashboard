@@ -7,9 +7,6 @@ import base64
 import urllib.parse
 import urllib.request
 import time
-import smtplib
-import ssl
-from email.message import EmailMessage
 import xml.etree.ElementTree as ET
 
 import pandas as pd
@@ -2494,50 +2491,46 @@ def delete_customer_pdf_order(order_id, customer_code=None):
             session.commit()
     return run_db_with_retry(operation)
 
-def send_new_order_email(customer_code,catalog,reference,notes,filename):
-    gmail=st.secrets.get("gmail",{})
-    sender=str(gmail.get("sender","")).strip()
-    recipient=str(gmail.get("recipient",sender)).strip()
-    app_password=str(gmail.get("app_password","")).replace(" ","").strip()
-    if not sender or not recipient or not app_password:
-        return False,"Configurazione Gmail incompleta nei Secrets di Streamlit."
+def send_new_order_resend(customer_code,catalog,reference,notes,filename):
+    settings=st.secrets.get("resend",{})
+    api_key=str(settings.get("api_key","")).strip()
+    recipient=str(settings.get("recipient","mdrappresentanze2020@gmail.com")).strip()
+    sender=str(settings.get("sender","MD Rappresentanze <onboarding@resend.dev>")).strip()
+    if not api_key or not recipient:
+        return False,"Configurazione Resend incompleta nei Secrets di Streamlit."
     customer_name=CLIENTS.get(customer_code,{}).get("name",customer_code)
-    message=EmailMessage()
-    message["From"]=sender
-    message["To"]=recipient
-    message["Subject"]=f"Nuovo ordine cliente - {customer_name}"
-    message.set_content(
-        f"Nuovo ordine ricevuto dalla dashboard MD Rappresentanze.\n\n"
-        f"Cliente: {customer_name}\n"
-        f"Codice cliente: {customer_code}\n"
-        f"Catalogo: {catalog}\n"
-        f"Riferimento: {reference or 'Non indicato'}\n"
-        f"File: {filename}\n"
-        f"Note: {notes or 'Nessuna'}\n\n"
-        f"Accedi alla dashboard per visualizzare e scaricare il PDF."
-    )
-    errors=[]
-    context=ssl.create_default_context()
-    # Primo tentativo: STARTTLS sulla porta 587.
+    payload={
+        "from":sender,
+        "to":[recipient],
+        "subject":f"Nuovo ordine cliente - {customer_name}",
+        "html":(
+            "<h2>Nuovo ordine ricevuto</h2>"
+            f"<p><b>Cliente:</b> {customer_name}<br>"
+            f"<b>Codice cliente:</b> {customer_code}<br>"
+            f"<b>Catalogo:</b> {catalog}<br>"
+            f"<b>Riferimento:</b> {reference or 'Non indicato'}<br>"
+            f"<b>File:</b> {filename}<br>"
+            f"<b>Note:</b> {notes or 'Nessuna'}</p>"
+            "<p>Accedi alla dashboard MD Rappresentanze per visualizzare e scaricare il PDF.</p>"
+        )
+    }
     try:
-        with smtplib.SMTP("smtp.gmail.com",587,timeout=25) as server:
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-            server.login(sender,app_password)
-            server.send_message(message)
-        return True,""
+        request=urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request,timeout=25) as response:
+            body=json.loads(response.read().decode("utf-8"))
+        if body.get("id"): return True,body.get("id")
+        return False,str(body)
+    except urllib.error.HTTPError as exc:
+        try: detail=exc.read().decode("utf-8")
+        except Exception: detail=str(exc)
+        return False,f"Resend HTTP {exc.code}: {detail}"
     except Exception as exc:
-        errors.append(f"porta 587: {type(exc).__name__}: {exc}")
-    # Secondo tentativo: SSL implicito sulla porta 465.
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com",465,context=context,timeout=25) as server:
-            server.login(sender,app_password)
-            server.send_message(message)
-        return True,""
-    except Exception as exc:
-        errors.append(f"porta 465: {type(exc).__name__}: {exc}")
-    return False," | ".join(errors)
+        return False,f"{type(exc).__name__}: {exc}"
 
 def send_order_page(user):
     is_admin=user.get('role')=='admin'
@@ -2572,19 +2565,14 @@ def send_order_page(user):
         if not uploaded: st.error('Seleziona un file PDF.')
         else:
             save_customer_pdf_order(code,reference.strip(),notes.strip(),catalog,uploaded.name,uploaded.getvalue())
-            sent,email_error=send_new_order_email(code,catalog,reference.strip(),notes.strip(),uploaded.name)
+            sent,email_result=send_new_order_resend(code,catalog,reference.strip(),notes.strip(),uploaded.name)
             if sent:
-                st.session_state['order_notification_notice']=('success','Ordine caricato correttamente. Notifica email inviata a mdrappresentanze2020@gmail.com.')
+                st.session_state['order_notification_notice']=('success','Ordine caricato correttamente. Notifica email inviata a mdrappresentanze2020@gmail.com tramite Resend.')
             else:
-                st.session_state['order_notification_notice']=('warning',f'Ordine caricato correttamente, ma la notifica email non è partita: {email_error}')
+                st.session_state['order_notification_notice']=('warning',f'Ordine caricato correttamente, ma la notifica email non è partita: {email_result}')
             st.rerun()
     orders=load_customer_pdf_orders(code)
     if orders:
-        order_notice=st.session_state.get('order_notification_notice')
-        if order_notice:
-            notice_type,notice_text=order_notice
-            if notice_type=='success': st.success(notice_text)
-            else: st.warning(notice_text)
         st.subheader('Storico ordini inviati')
         st.dataframe(pd.DataFrame([{'Data':r['created_at'],'Catalogo':r.get('catalog','HOME / SPLIT'),'Riferimento':r['reference'],'File':r['filename'],'Stato':r['status']} for r in orders]),use_container_width=True,hide_index=True)
         choices={f"{r['reference'] or r['filename']} · {r['created_at']}":r for r in orders}
