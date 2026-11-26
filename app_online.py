@@ -2392,12 +2392,22 @@ def import_order_price_list(catalog,uploaded_file):
     preview=pd.read_excel(io.BytesIO(raw),header=None,engine='openpyxl')
     rows=[]
     if catalog=='VRF':
+        # Il listino VRF ha intestazioni ripetute e può iniziare dopo alcune righe.
+        # Leggiamo tutte le righe e normalizziamo i valori numerici di Excel.
         for _,r in preview.iterrows():
             model=str(r.iloc[0]).strip() if len(r)>0 and pd.notna(r.iloc[0]) else ''
-            code=str(r.iloc[1]).strip().replace('.0','') if len(r)>1 and pd.notna(r.iloc[1]) else ''
-            try: price=float(r.iloc[2])
+            raw_code=r.iloc[1] if len(r)>1 else None
+            raw_price=r.iloc[2] if len(r)>2 else None
+            if pd.isna(raw_code) or pd.isna(raw_price): continue
+            try:
+                code=str(int(float(raw_code)))
+            except Exception:
+                code=re.sub(r'\D','',str(raw_code))
+            try:
+                price=float(str(raw_price).replace('€','').replace('.','').replace(',','.').strip()) if isinstance(raw_price,str) else float(raw_price)
             except Exception: continue
-            if re.fullmatch(r'\d{6,12}',code): rows.append((code,model,model,price))
+            if model.upper()=='MODELLO' or not re.fullmatch(r'\d{6,12}',code): continue
+            rows.append((code,model,model,price))
     else:
         data=pd.read_excel(io.BytesIO(raw),engine='openpyxl')
         for _,r in data.iterrows():
@@ -2432,7 +2442,9 @@ def price_lists_admin_page():
     catalog=st.selectbox('Catalogo',['HOME / SPLIT','VRF'])
     uploaded=st.file_uploader('Listino Excel',type=['xlsx'],key='price_list_upload')
     if st.button('Importa listino',type='primary',use_container_width=True,disabled=uploaded is None):
-        count=import_order_price_list(catalog,uploaded);st.success(f'Importati {count} articoli nel catalogo {catalog}.')
+        count=import_order_price_list(catalog,uploaded)
+        if count: st.success(f'Importati {count} articoli nel catalogo {catalog}.')
+        else: st.error('Nessun articolo importato. Verifica di aver selezionato il catalogo corretto per questo file Excel.')
     current=load_order_price_list(catalog)
     st.metric('Articoli disponibili',len(current))
 
