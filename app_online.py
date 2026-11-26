@@ -2429,20 +2429,22 @@ def import_order_price_list(catalog,uploaded_file):
                 try: price=float(str(raw_price).replace('€','').replace('.','').replace(',','.').strip())
                 except Exception: price=0.0
             rows.append((code,model,description,price))
+    # Elimina i duplicati nel file prima dell'inserimento, mantenendo l'ultima riga per codice.
+    unique_rows={code:(code,model,description,price) for code,model,description,price in rows}
+    payload=[{'catalog':catalog,'code':code,'model':model,'description':description,'price':price} for code,model,description,price in unique_rows.values()]
     def operation(connection):
         with connection.session as session:
             session.execute(text('DELETE FROM order_price_lists WHERE catalog=:catalog'),{'catalog':catalog})
-            for code,model,description,price in rows:
+            if payload:
                 session.execute(text("""INSERT INTO order_price_lists(catalog,product_code,model,description,list_price,updated_at)
                     VALUES(:catalog,:code,:model,:description,:price,CURRENT_TIMESTAMP)
                     ON CONFLICT(catalog,product_code) DO UPDATE SET
                         model=EXCLUDED.model,
                         description=EXCLUDED.description,
                         list_price=EXCLUDED.list_price,
-                        updated_at=CURRENT_TIMESTAMP"""),
-                    {'catalog':catalog,'code':code,'model':model,'description':description,'price':price})
+                        updated_at=CURRENT_TIMESTAMP"""),payload)
             session.commit()
-    run_db_with_retry(operation);return len(rows)
+    run_db_with_retry(operation);return len(payload)
 
 def load_order_price_list(catalog):
     ensure_customer_orders_tables()
