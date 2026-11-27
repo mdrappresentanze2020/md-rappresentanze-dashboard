@@ -2763,8 +2763,16 @@ def availability_page(user):
         st.subheader(f"{row.get('codice','')} · {model}")
         if available:
             first_date,first_qty=available[0]
-            st.success(f'Disponibile: {first_qty} unità al {first_date}')
-            st.dataframe(pd.DataFrame([{'Data':d,'Quantità disponibile':q} for d,q in available]),use_container_width=True,hide_index=True)
+            st.markdown(
+                f'''<div style="background:#0b3529;border:1px solid #2f8067;border-radius:12px;padding:18px 20px;margin:6px 0 18px 0;">
+                <div style="color:#ffffff;font-size:20px;font-weight:700;line-height:1.35;">Disponibile: {first_qty} unità al {first_date}</div>
+                </div>''',
+                unsafe_allow_html=True,
+            )
+            first_four=available[:4]
+            st.dataframe(pd.DataFrame([{'Data':d,'Quantità disponibile':q} for d,q in first_four]),use_container_width=True,hide_index=True)
+            if len(available)>4:
+                st.caption('Sono mostrate le prime 4 disponibilità previste.')
         else:
             st.error('Prodotto non disponibile nelle date pubblicate.')
     with tab_request:
