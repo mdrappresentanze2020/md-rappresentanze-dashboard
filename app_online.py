@@ -144,6 +144,16 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
 [data-testid="stAlert"] p,[data-testid="stAlert"] span,[data-testid="stAlert"] div{color:#ffffff!important;-webkit-text-fill-color:#ffffff!important}
 [data-testid="stMain"] div[style*="background:#1f2f46"] *,
 [data-testid="stMain"] div[style*="background: #1f2f46"] *{color:#ffffff!important;-webkit-text-fill-color:#ffffff!important}
+
+/* Menu laterale senza selectbox: solo gruppi espandibili e pulsanti */
+[data-testid="stSidebar"] [data-testid="stExpander"]{border:1px solid #d7dde5!important;border-radius:10px!important;background:#ffffff!important;margin-bottom:8px!important}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary,
+[data-testid="stSidebar"] [data-testid="stExpander"] summary *{color:#1f2937!important;-webkit-text-fill-color:#1f2937!important;font-weight:800!important}
+[data-testid="stSidebar"] [data-testid="stExpander"] button{background:#f7f8fa!important;border:1px solid #d7dde5!important;color:#1f2937!important}
+[data-testid="stSidebar"] [data-testid="stExpander"] button p,
+[data-testid="stSidebar"] [data-testid="stExpander"] button span,
+[data-testid="stSidebar"] [data-testid="stExpander"] button div{color:#1f2937!important;-webkit-text-fill-color:#1f2937!important}
+[data-testid="stSidebar"] [data-testid="stExpander"] button:hover{background:#eaf4fb!important;border-color:#087dac!important}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
@@ -2987,22 +2997,28 @@ with st.sidebar:
             "Ordini e logistica":["Disponibilità","Conferme Ordine","DDT","Invia Ordine"],
             "Accordi commerciali":["Accordi commerciali"],
         }
-    menu_group=st.selectbox("Menu",list(menu_groups.keys()),key="sidebar_menu_group")
-    if menu_group=="Accordi commerciali":
-        with st.expander("Scegli accordo commerciale",expanded=True):
-            agreement_options=[
-                "Promo EDGE e AQUA","EDGE EVO 2.0","Super Pre Split e Aqua F",
-                "Sconto Bilico 2027","NATIVE 2","Accordo Commerciale 2027",
-            ]
-            st.radio(
-                "Accordo",
-                agreement_options,
-                key="sidebar_agreement_choice",
-                label_visibility="collapsed",
-            )
-        page="Accordi commerciali"
-    else:
-        page=st.selectbox("Sezione",menu_groups[menu_group],key=f"sidebar_menu_page_{menu_group}")
+    st.markdown("**Menu**")
+    page=None
+    for group_name,group_pages in menu_groups.items():
+        with st.expander(group_name,expanded=(group_name=="Principale")):
+            if group_name=="Accordi commerciali":
+                agreement_options=[
+                    "Promo EDGE e AQUA","EDGE EVO 2.0","Super Pre Split e Aqua F",
+                    "Sconto Bilico 2027","NATIVE 2","Accordo Commerciale 2027",
+                ]
+                agreement=st.radio(
+                    "Accordo",
+                    agreement_options,
+                    key="sidebar_agreement_choice",
+                    label_visibility="collapsed",
+                )
+                if st.button("Apri accordo",key="open_commercial_agreement",use_container_width=True):
+                    st.session_state["sidebar_selected_page"]="Accordi commerciali"
+            else:
+                for item in group_pages:
+                    if st.button(item,key=f"nav_{group_name}_{item}",use_container_width=True):
+                        st.session_state["sidebar_selected_page"]=item
+    page=st.session_state.get("sidebar_selected_page","Dashboard")
 
 if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
 if page=="Conferme Ordine": document_archive_page(user,"conferma");st.stop()
