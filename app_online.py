@@ -235,6 +235,28 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
   font-weight:500!important;
   text-align:left!important;
 }
+
+/* Aggiorna ed Esci coerenti con il menu pulito */
+[data-testid="stSidebar"] > div > div > div > [data-testid="stButton"] button{
+  background:transparent!important;
+  border:none!important;
+  box-shadow:none!important;
+  border-radius:0!important;
+  color:#111111!important;
+  min-height:32px!important;
+  padding:4px 4px!important;
+  justify-content:flex-start!important;
+}
+[data-testid="stSidebar"] > div > div > div > [data-testid="stButton"] button:hover{background:#e9e9e9!important}
+[data-testid="stSidebar"] > div > div > div > [data-testid="stButton"] button p,
+[data-testid="stSidebar"] > div > div > div > [data-testid="stButton"] button span,
+[data-testid="stSidebar"] > div > div > div > [data-testid="stButton"] button div{
+  color:#111111!important;
+  -webkit-text-fill-color:#111111!important;
+  font-size:13px!important;
+  font-weight:600!important;
+  text-align:left!important;
+}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
