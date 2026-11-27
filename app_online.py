@@ -130,6 +130,20 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
 /* Contrasto forzato per tutti gli avvisi Streamlit su sfondi scuri */
 [data-testid="stAlert"] p,[data-testid="stAlert"] span,[data-testid="stAlert"] div{color:#ffffff!important;-webkit-text-fill-color:#ffffff!important}
 [data-testid="stAlert"] svg{fill:#ffffff!important;color:#ffffff!important}
+
+/* Contrasto menu laterale, selectbox, expander e avvisi */
+[data-testid="stSidebar"] [data-baseweb="select"] > div{background:#2c2925!important;border-color:#d54b58!important;color:#ffffff!important}
+[data-testid="stSidebar"] [data-baseweb="select"] span,
+[data-testid="stSidebar"] [data-baseweb="select"] div,
+[data-testid="stSidebar"] [data-baseweb="select"] input{color:#ffffff!important;-webkit-text-fill-color:#ffffff!important}
+[data-testid="stSidebar"] [data-baseweb="select"] svg{fill:#ffffff!important;color:#ffffff!important}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary,
+[data-testid="stSidebar"] [data-testid="stExpander"] summary *{color:#1f2937!important;-webkit-text-fill-color:#1f2937!important;font-weight:700!important}
+[data-testid="stSidebar"] [data-testid="stExpander"] [role="radiogroup"] label,
+[data-testid="stSidebar"] [data-testid="stExpander"] [role="radiogroup"] label *{color:#1f2937!important;-webkit-text-fill-color:#1f2937!important}
+[data-testid="stAlert"] p,[data-testid="stAlert"] span,[data-testid="stAlert"] div{color:#ffffff!important;-webkit-text-fill-color:#ffffff!important}
+[data-testid="stMain"] div[style*="background:#1f2f46"] *,
+[data-testid="stMain"] div[style*="background: #1f2f46"] *{color:#ffffff!important;-webkit-text-fill-color:#ffffff!important}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
