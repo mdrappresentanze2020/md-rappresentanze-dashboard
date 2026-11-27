@@ -2737,7 +2737,12 @@ def availability_page(user):
     st.caption(f'Dati aggiornati: {updated_at}')
     search=st.text_input('Codice prodotto o modello',placeholder='Esempio: 87012281 oppure MU2-Y 41M')
     if not search.strip():
-        st.info('Inserisci un codice o un modello per verificare la disponibilità.');return
+        st.markdown(
+            '''<div style="background:#1f2f46;border:1px solid #334b6b;border-radius:11px;padding:18px 20px;margin-top:18px;">
+            <div style="color:#ffffff !important;font-size:18px;font-weight:700;line-height:1.4;">Inserisci un codice o un modello per verificare la disponibilità.</div>
+            </div>''',
+            unsafe_allow_html=True,
+        );return
     df=pd.DataFrame(records)
     needle=search.strip().lower()
     searchable=df[['codice','descrizione','serie','grandezza']].astype(str)
