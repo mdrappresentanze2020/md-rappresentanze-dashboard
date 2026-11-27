@@ -2651,6 +2651,126 @@ def order_codes_page():
         st.download_button('Scarica CSV',csv_bytes,file_name=f"codici_ordine_{selected['id']}.csv",mime='text/csv',type='primary',use_container_width=True)
     with st.expander('Anteprima PDF ordine'): pdf_image_preview(bytes(selected['content']),'ordine_codici')
 
+
+def ensure_availability_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS clivet_availability_store(
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                payload_json TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def save_availability_csv(csv_bytes):
+    ensure_availability_table()
+    df=pd.read_csv(io.BytesIO(csv_bytes),sep=';',dtype=str,engine='python').fillna('')
+    required={'codice','descrizione','aggiornato_il'}
+    if not required.issubset(set(df.columns)):
+        raise ValueError('CSV non riconosciuto: mancano codice, descrizione o aggiornato_il.')
+    records=df.to_dict('records')
+    payload=json.dumps(records,ensure_ascii=False)
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""INSERT INTO clivet_availability_store(id,payload_json,updated_at)
+                VALUES(1,:payload,CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET payload_json=EXCLUDED.payload_json,updated_at=CURRENT_TIMESTAMP"""),{'payload':payload})
+            session.commit()
+    run_db_with_retry(operation)
+    return len(records)
+
+def load_availability_data():
+    ensure_availability_table()
+    def operation(connection):
+        with connection.session as session:
+            row=session.execute(text('SELECT payload_json,updated_at FROM clivet_availability_store WHERE id=1')).mappings().first()
+            if not row:return [],None
+            return json.loads(row['payload_json']),row['updated_at']
+    return run_db_with_retry(operation)
+
+def send_booking_cart_email(user,items,notes):
+    settings=st.secrets.get("resend",{})
+    api_key=str(settings.get("api_key","")).strip()
+    recipient=str(settings.get("recipient","mdrappresentanze2020@gmail.com")).strip()
+    sender=str(settings.get("sender","MD Rappresentanze <onboarding@resend.dev>")).strip()
+    if not api_key or not recipient:return False,"Configurazione Resend incompleta nei Secrets di Streamlit."
+    customer_code=str(user.get('customer_code') or user.get('code') or '').strip().upper()
+    customer_name=CLIENTS.get(customer_code,{}).get('name',customer_code or user.get('username','Cliente'))
+    rows=''.join(f"<tr><td>{x['codice']}</td><td>{x['modello']}</td><td>{x['quantita']}</td><td>{x['disponibile_oggi']}</td><td>{x['data']}</td></tr>" for x in items)
+    payload={"from":sender,"to":[recipient],"subject":f"Richiesta prenotazione multiprodotto - {customer_name}","html":f'''<h2>Richiesta prenotazione materiale</h2><p><b>Cliente:</b> {customer_name}<br><b>Codice cliente:</b> {customer_code or 'Non indicato'}<br><b>Utente:</b> {user.get('username','')}</p><table border='1' cellpadding='7' cellspacing='0'><thead><tr><th>Codice</th><th>Modello</th><th>Quantità richiesta</th><th>Disponibile oggi</th><th>Data disponibilità</th></tr></thead><tbody>{rows}</tbody></table><p><b>Totale pezzi:</b> {sum(int(x['quantita']) for x in items)}</p><p><b>Note:</b> {notes or 'Nessuna'}</p><p>La richiesta deve essere verificata e confermata prima della prenotazione definitiva.</p>'''}
+    try:
+        req=urllib.request.Request('https://api.resend.com/emails',data=json.dumps(payload).encode('utf-8'),headers={'Authorization':f'Bearer {api_key}','Content-Type':'application/json','User-Agent':'MD-Rappresentanze-Dashboard/1.0'},method='POST')
+        with urllib.request.urlopen(req,timeout=25) as response:body=json.loads(response.read().decode('utf-8'))
+        return (True,body.get('id','')) if body.get('id') else (False,str(body))
+    except urllib.error.HTTPError as exc:
+        try:detail=exc.read().decode('utf-8')
+        except Exception:detail=str(exc)
+        return False,f"Resend HTTP {exc.code}: {detail}"
+    except Exception as exc:return False,f"{type(exc).__name__}: {exc}"
+
+def availability_page(user):
+    st.title('Verifica disponibilità')
+    is_admin=user.get('role')=='admin'
+    if is_admin:
+        sync_status=load_clivet_sync_status()
+        if sync_status.get('status')=='login_required':st.error('Accesso Clivet richiesto sul PC locale. Le disponibilità pubblicate restano consultabili ma potrebbero non essere aggiornate.')
+        elif sync_status.get('status')=='error':st.warning(f"Ultimo aggiornamento Clivet non completato: {sync_status.get('message') or 'errore non specificato'}")
+        st.caption('Le disponibilità vengono aggiornate dal sincronizzatore locale Clivet.')
+    records,updated_at=load_availability_data()
+    if not records:st.info('Disponibilità non ancora aggiornate.');return
+    st.caption(f'Dati aggiornati: {updated_at}')
+    cart_key='availability_booking_cart'
+    if cart_key not in st.session_state:st.session_state[cart_key]={}
+    tab_search,tab_cart=st.tabs(['Cerca prodotto',f"Carrello prenotazioni ({len(st.session_state[cart_key])})"])
+    with tab_search:
+        search=st.text_input('Codice prodotto o modello',placeholder='Esempio: 87012281 oppure MU2-Y 41M')
+        if not search.strip():
+            st.markdown('''<div style="background:#1f2f46;border:1px solid #334b6b;border-radius:11px;padding:18px 20px;margin-top:18px;"><div style="color:#ffffff !important;font-size:18px;font-weight:700;line-height:1.4;">Inserisci un codice o un modello per verificare la disponibilità.</div></div>''',unsafe_allow_html=True)
+        else:
+            df=pd.DataFrame(records);needle=search.strip().lower();searchable=df[['codice','descrizione','serie','grandezza']].astype(str)
+            matches=df[searchable.apply(lambda col: col.str.lower().str.contains(re.escape(needle),na=False)).any(axis=1)]
+            if matches.empty:st.warning('Prodotto non trovato oppure non presente nell’ultimo aggiornamento.')
+            else:
+                if len(matches)>1:
+                    labels={f"{r.get('codice','')} · {r.get('serie','')} {r.get('grandezza','')}":i for i,r in matches.iterrows()};row=matches.loc[labels[st.selectbox('Seleziona il prodotto',list(labels.keys()))]]
+                else:row=matches.iloc[0]
+                date_cols=[c for c in df.columns if re.fullmatch(r'\d{2}/\d{2}',str(c))]
+                quantities=[]
+                for c in date_cols:
+                    try:q=int(float(str(row.get(c,0)).replace(',','.')))
+                    except Exception:q=0
+                    quantities.append((c,q))
+                available=[(d,q) for d,q in quantities if q>0];first_four=available[:4]
+                model=f"{row.get('serie','')} {row.get('grandezza','')}".strip();st.subheader(f"{row.get('codice','')} · {model}")
+                if first_four:st.dataframe(pd.DataFrame([{'Data':d,'Quantità disponibile':q} for d,q in first_four]),use_container_width=True,hide_index=True)
+                else:st.error('Prodotto non disponibile nelle date pubblicate.')
+                today=datetime.now().strftime('%d/%m');today_qty=next((q for d,q in quantities if d==today),0)
+                if today_qty>0:
+                    st.markdown(f'''<div style="background:#0b3529;border:1px solid #2f8067;border-radius:12px;padding:18px 20px;margin:12px 0;"><div style="color:#ffffff !important;font-size:20px;font-weight:700;">Disponibile oggi: {today_qty} unità</div></div>''',unsafe_allow_html=True)
+                    qty=st.number_input('Quantità da aggiungere al carrello',min_value=1,max_value=today_qty,value=1,step=1,key=f"cart_qty_{row.get('codice','')}")
+                    if st.button('Aggiungi al carrello prenotazioni',type='primary',use_container_width=True,key=f"cart_add_{row.get('codice','')}"):
+                        code=str(row.get('codice',''));existing=st.session_state[cart_key].get(code,{});new_qty=min(today_qty,int(existing.get('quantita',0))+int(qty))
+                        st.session_state[cart_key][code]={'codice':code,'modello':model,'quantita':new_qty,'disponibile_oggi':today_qty,'data':today};st.success('Prodotto aggiunto al carrello.')
+                else:
+                    st.warning(f'Prodotto non prenotabile: non risulta disponibilità alla data odierna ({today}). Le disponibilità future sono solo informative.')
+    with tab_cart:
+        cart=st.session_state[cart_key]
+        if not cart:st.info('Il carrello prenotazioni è vuoto.')
+        else:
+            st.subheader('Materiale da richiedere')
+            for code,item in list(cart.items()):
+                c1,c2,c3=st.columns([5,2,1])
+                c1.write(f"**{code} · {item['modello']}**  | Disponibili oggi: {item['disponibile_oggi']}")
+                item['quantita']=c2.number_input('Quantità',min_value=1,max_value=int(item['disponibile_oggi']),value=int(item['quantita']),step=1,key=f"cart_edit_{code}",label_visibility='collapsed')
+                if c3.button('Elimina',key=f"cart_delete_{code}"):del cart[code];st.rerun()
+            st.metric('Totale pezzi richiesti',sum(int(x['quantita']) for x in cart.values()))
+            notes=st.text_area('Note generali per la richiesta',key='booking_cart_notes')
+            confirm=st.checkbox('Confermo di voler inviare la richiesta di prenotazione',key='booking_cart_confirm')
+            if st.button('Invia richiesta riepilogativa',type='primary',use_container_width=True,disabled=not confirm):
+                sent,result=send_booking_cart_email(user,list(cart.values()),notes.strip())
+                if sent:st.success('Richiesta inviata a MD Rappresentanze.');st.session_state[cart_key]={};st.session_state['booking_cart_notes']='';st.rerun()
+                else:st.error(f'Richiesta non inviata: {result}')
+
 def test_resend_page():
     st.title("Test notifica Resend")
     st.caption("Verifica diretta della configurazione Resend, indipendentemente dal caricamento degli ordini.")
@@ -2759,17 +2879,19 @@ with st.sidebar:
         st.session_state.user=None
         time.sleep(0.7)
         st.rerun()
-    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Ordini Clienti","Codici Ordine","Gestione listini ordini","Test notifica Resend","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
+    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Disponibilità","Ordini Clienti","Codici Ordine","Gestione listini ordini","Test notifica Resend","Stato sincronizzazione Clivet","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Disponibilità","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
 if page=="Conferme Ordine": document_archive_page(user,"conferma");st.stop()
 if page=="DDT": document_archive_page(user,"ddt");st.stop()
+if page=="Disponibilità": availability_page(user);st.stop()
 if page=="Invia Ordine": send_order_page(user);st.stop()
 if page=="Ordini Clienti": send_order_page(user);st.stop()
 if page=="Codici Ordine": order_codes_page();st.stop()
 if page=="Gestione listini ordini": price_lists_admin_page();st.stop()
 if page=="Test notifica Resend": test_resend_page();st.stop()
+if page=="Stato sincronizzazione Clivet": clivet_sync_admin_page();st.stop()
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
