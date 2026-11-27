@@ -126,6 +126,10 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
   .months{grid-template-columns:repeat(3,1fr)!important}
 }
 .login-logo{text-align:center;margin-bottom:12px}.client-card{background:#fff;border:1px solid #d7dde5;border-left:5px solid #087dac;border-radius:9px;padding:14px;margin-bottom:10px}
+
+/* Contrasto forzato per tutti gli avvisi Streamlit su sfondi scuri */
+[data-testid="stAlert"] p,[data-testid="stAlert"] span,[data-testid="stAlert"] div{color:#ffffff!important;-webkit-text-fill-color:#ffffff!important}
+[data-testid="stAlert"] svg{fill:#ffffff!important;color:#ffffff!important}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
@@ -2802,7 +2806,13 @@ def availability_page(user):
                         code=str(row.get('codice',''));existing=st.session_state[cart_key].get(code,{});new_qty=min(today_qty,int(existing.get('quantita',0))+int(qty))
                         st.session_state[cart_key][code]={'codice':code,'modello':model,'quantita':new_qty,'disponibile_oggi':today_qty,'data':today};st.success('Prodotto aggiunto al carrello.')
                 else:
-                    st.warning(f'Prodotto non prenotabile: non risulta disponibilità alla data odierna ({today}). Le disponibilità future sono solo informative.')
+                    st.markdown(
+                        f'''<div style="background:#4a3510 !important;border:1px solid #d6a53a !important;border-radius:11px;padding:17px 20px;margin:12px 0;">
+                        <div style="color:#ffffff !important;-webkit-text-fill-color:#ffffff !important;font-size:17px;font-weight:700;line-height:1.45;">
+                        Prodotto non prenotabile: non risulta disponibilità alla data odierna ({today}). Le disponibilità future sono solo informative.
+                        </div></div>''',
+                        unsafe_allow_html=True,
+                    )
     with tab_cart:
         cart=st.session_state[cart_key]
         if not cart:st.info('Il carrello prenotazioni è vuoto.')
