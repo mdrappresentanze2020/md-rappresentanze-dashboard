@@ -3038,7 +3038,7 @@ def availability_page(user):
     with tab_search:
         search=st.text_input('Codice prodotto o modello',placeholder='Esempio: 87012281 oppure MU2-Y 41M')
         if not search.strip():
-            st.markdown('''<div style="background:#1f2f46;border:1px solid #334b6b;border-radius:11px;padding:18px 20px;margin-top:18px;"><div style="color:#ffffff !important;font-size:18px;font-weight:700;line-height:1.4;">Inserisci un codice o un modello per verificare la disponibilità.</div></div>''',unsafe_allow_html=True)
+            st.markdown('''<div style="background:#f7f7f7;border:1px solid #e2e2e2;border-radius:8px;padding:16px 18px;margin-top:18px;"><div style="color:#111111 !important;-webkit-text-fill-color:#111111 !important;font-size:16px;font-weight:650;line-height:1.4;">Inserisci un codice o un modello per verificare la disponibilità.</div></div>''',unsafe_allow_html=True)
         else:
             df=pd.DataFrame(records);needle=search.strip().lower();searchable=df[['codice','descrizione','serie','grandezza']].astype(str)
             matches=df[searchable.apply(lambda col: col.str.lower().str.contains(re.escape(needle),na=False)).any(axis=1)]
