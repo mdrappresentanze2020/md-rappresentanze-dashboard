@@ -355,6 +355,28 @@ div[class*="st-key-logout_dashboard"] button div{
   -webkit-text-fill-color:#111111!important;
   border-color:#dddddd!important;
 }
+
+/* Textarea chiare in tutta la dashboard */
+[data-testid="stTextArea"] textarea{
+  background:#ffffff!important;
+  background-color:#ffffff!important;
+  color:#111111!important;
+  -webkit-text-fill-color:#111111!important;
+  caret-color:#111111!important;
+  border-color:#d7d7d7!important;
+}
+[data-testid="stTextArea"] textarea:focus{
+  background:#ffffff!important;
+  color:#111111!important;
+  -webkit-text-fill-color:#111111!important;
+  border-color:#087dac!important;
+  box-shadow:0 0 0 1px #087dac!important;
+}
+[data-testid="stTextArea"] textarea::placeholder{
+  color:#777777!important;
+  -webkit-text-fill-color:#777777!important;
+  opacity:1!important;
+}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
