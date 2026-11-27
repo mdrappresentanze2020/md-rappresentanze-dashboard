@@ -2831,6 +2831,25 @@ def availability_page(user):
                 if sent:st.success('Richiesta inviata a MD Rappresentanze.');st.session_state[cart_key]={};st.session_state['booking_cart_notes']='';st.rerun()
                 else:st.error(f'Richiesta non inviata: {result}')
 
+def commercial_agreements_hub(user):
+    st.title("Accordi commerciali")
+    st.caption("Seleziona l’accordo da consultare.")
+    agreements={
+        "Promo EDGE e AQUA":("addendum","promo"),
+        "EDGE EVO 2.0":("addendum","evo"),
+        "Super Pre Split e Aqua F":("superpre",None),
+        "Sconto Bilico 2027":("bilico",None),
+        "NATIVE 2":("native",None),
+        "Accordo Commerciale 2027":("commercial",None),
+    }
+    choice=st.selectbox("Accordo",list(agreements.keys()),key="commercial_agreement_choice")
+    kind,section=agreements[choice]
+    if kind=="addendum":addendum_page(user,section)
+    elif kind=="superpre":superpre_page(user)
+    elif kind=="bilico":bilico_page(user)
+    elif kind=="native":native_page(user)
+    else:commercial_agreement_page(user)
+
 def test_resend_page():
     st.title("Test notifica Resend")
     st.caption("Verifica diretta della configurazione Resend, indipendentemente dal caricamento degli ordini.")
@@ -2939,7 +2958,19 @@ with st.sidebar:
         st.session_state.user=None
         time.sleep(0.7)
         st.rerun()
-    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Disponibilità","Ordini Clienti","Codici Ordine","Gestione listini ordini","Test notifica Resend","Stato sincronizzazione Clivet","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Disponibilità","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
+    if user.get("role")=="admin":
+        pages=[
+            "Dashboard","Fatturato Prodotti (quantità)","Riepilogo vantaggi",
+            "Disponibilità","Ordini Clienti","Codici Ordine","Conferme Ordine","DDT",
+            "Gestione clienti","Target annuali","Gestione listini ordini","Aggiorna dati",
+            "Accordi commerciali",
+            "Stato sincronizzazione Clivet","Gestione PDF conferme","Test notifica Resend",
+        ]
+    else:
+        pages=[
+            "Dashboard","Fatturato Prodotti (quantità)","Riepilogo vantaggi",
+            "Disponibilità","Conferme Ordine","DDT","Invia Ordine","Accordi commerciali",
+        ]
     page=st.radio("Sezione",pages)
 
 if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
@@ -2957,12 +2988,7 @@ if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
 if page=="Gestione PDF conferme": order_pdfs_page();st.stop()
 if page=="Riepilogo vantaggi": benefits_summary_page(user);st.stop()
-if page=="Accordi Addendum · Promo EDGE e AQUA": addendum_page(user,"promo");st.stop()
-if page=="Accordi Addendum · EDGE EVO 2.0": addendum_page(user,"evo");st.stop()
-if page=="Accordi Addendum · Super Pre Split e Aqua F": superpre_page(user);st.stop()
-if page=="Accordi Addendum · Sconto Bilico 2027": bilico_page(user);st.stop()
-if page=="Accordi Addendum · NATIVE 2": native_page(user);st.stop()
-if page=="Accordi Addendum · Accordo Commerciale 2027": commercial_agreement_page(user);st.stop()
+if page=="Accordi commerciali": commercial_agreements_hub(user);st.stop()
 if user.get("role")=="admin":
     admin_dashboard();st.stop()
 code=str(user.get("customer_code","")).strip().upper()
