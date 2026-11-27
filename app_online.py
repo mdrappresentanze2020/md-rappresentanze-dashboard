@@ -377,6 +377,18 @@ div[class*="st-key-logout_dashboard"] button div{
   -webkit-text-fill-color:#777777!important;
   opacity:1!important;
 }
+
+/* Textarea con lo stesso grigio chiarissimo del menu laterale */
+[data-testid="stTextArea"] textarea,
+[data-testid="stTextArea"] textarea:focus{
+  background:#f7f7f7!important;
+  background-color:#f7f7f7!important;
+  color:#111111!important;
+  -webkit-text-fill-color:#111111!important;
+  caret-color:#111111!important;
+}
+[data-testid="stTextArea"] textarea{border-color:#d7d7d7!important}
+[data-testid="stTextArea"] textarea:focus{border-color:#087dac!important;box-shadow:0 0 0 1px #087dac!important}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
