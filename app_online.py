@@ -2730,13 +2730,7 @@ def availability_page(user):
     st.title('Verifica disponibilità')
     is_admin=user.get('role')=='admin'
     if is_admin:
-        with st.expander('Aggiornamento riservato Admin',expanded=False):
-            uploaded=st.file_uploader('File disponibilità CSV',type=['csv'],key='availability_csv_upload')
-            if st.button('Pubblica disponibilità',type='primary',use_container_width=True,disabled=uploaded is None):
-                try:
-                    count=save_availability_csv(uploaded.getvalue())
-                    st.success(f'Aggiornate le disponibilità di {count} prodotti.');st.rerun()
-                except Exception as exc:st.error(f'Errore nel caricamento: {exc}')
+        st.caption('Le disponibilità vengono aggiornate dal sincronizzatore locale Clivet. Non è necessario caricare file CSV.')
     records,updated_at=load_availability_data()
     if not records:
         st.info('Disponibilità non ancora aggiornate.');return
