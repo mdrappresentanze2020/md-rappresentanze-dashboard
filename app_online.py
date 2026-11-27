@@ -183,6 +183,58 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
 [data-testid="stTable"] th{background:#e6e8eb!important;color:#111111!important;font-weight:700!important}
 [data-testid="stTable"] td{background:#f7f7f7!important;color:#111111!important}
 [data-testid="stTable"] th *,[data-testid="stTable"] td *{color:#111111!important;-webkit-text-fill-color:#111111!important}
+
+/* Menu laterale pulito: grigio chiarissimo, testo nero, nessun riquadro o contorno */
+[data-testid="stSidebar"]{background:#f7f7f7!important;border-right:1px solid #ececec!important}
+[data-testid="stSidebar"] [data-testid="stExpander"]{
+  background:transparent!important;
+  border:none!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+  margin:0!important;
+  padding:0!important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] details{
+  background:transparent!important;
+  border:none!important;
+  box-shadow:none!important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary{
+  background:transparent!important;
+  border:none!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+  padding:7px 2px!important;
+  min-height:34px!important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{background:#eeeeee!important}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary,
+[data-testid="stSidebar"] [data-testid="stExpander"] summary *{
+  color:#111111!important;
+  -webkit-text-fill-color:#111111!important;
+  font-weight:650!important;
+  font-size:14px!important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary svg{color:#111111!important;fill:#111111!important}
+[data-testid="stSidebar"] [data-testid="stExpander"] button{
+  background:transparent!important;
+  border:none!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+  min-height:31px!important;
+  padding:4px 8px 4px 20px!important;
+  justify-content:flex-start!important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] button:hover{background:#e9e9e9!important}
+[data-testid="stSidebar"] [data-testid="stExpander"] button p,
+[data-testid="stSidebar"] [data-testid="stExpander"] button span,
+[data-testid="stSidebar"] [data-testid="stExpander"] button div{
+  color:#111111!important;
+  -webkit-text-fill-color:#111111!important;
+  font-size:13px!important;
+  font-weight:500!important;
+  text-align:left!important;
+}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
