@@ -2651,6 +2651,84 @@ def order_codes_page():
         st.download_button('Scarica CSV',csv_bytes,file_name=f"codici_ordine_{selected['id']}.csv",mime='text/csv',type='primary',use_container_width=True)
     with st.expander('Anteprima PDF ordine'): pdf_image_preview(bytes(selected['content']),'ordine_codici')
 
+
+def ensure_availability_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS clivet_availability_store(
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                payload_json TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def save_availability_csv(csv_bytes):
+    ensure_availability_table()
+    df=pd.read_csv(io.BytesIO(csv_bytes),sep=';',dtype=str,engine='python').fillna('')
+    required={'codice','descrizione','aggiornato_il'}
+    if not required.issubset(set(df.columns)):
+        raise ValueError('CSV non riconosciuto: mancano codice, descrizione o aggiornato_il.')
+    records=df.to_dict('records')
+    payload=json.dumps(records,ensure_ascii=False)
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""INSERT INTO clivet_availability_store(id,payload_json,updated_at)
+                VALUES(1,:payload,CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET payload_json=EXCLUDED.payload_json,updated_at=CURRENT_TIMESTAMP"""),{'payload':payload})
+            session.commit()
+    run_db_with_retry(operation)
+    return len(records)
+
+def load_availability_data():
+    ensure_availability_table()
+    def operation(connection):
+        with connection.session as session:
+            row=session.execute(text('SELECT payload_json,updated_at FROM clivet_availability_store WHERE id=1')).mappings().first()
+            if not row:return [],None
+            return json.loads(row['payload_json']),row['updated_at']
+    return run_db_with_retry(operation)
+
+def availability_page(user):
+    st.title('Disponibilità prodotti')
+    is_admin=user.get('role')=='admin'
+    if is_admin:
+        with st.expander('Aggiorna disponibilità da CSV',expanded=False):
+            st.caption('Carica il file disponibilita_clivet.csv generato dal sincronizzatore locale.')
+            uploaded=st.file_uploader('File disponibilità CSV',type=['csv'],key='availability_csv_upload')
+            if st.button('Pubblica disponibilità',type='primary',use_container_width=True,disabled=uploaded is None):
+                try:
+                    count=save_availability_csv(uploaded.getvalue())
+                    st.success(f'Pubblicati {count} prodotti.');st.rerun()
+                except Exception as exc:st.error(f'Errore nel caricamento: {exc}')
+    records,updated_at=load_availability_data()
+    if not records:
+        st.info('Disponibilità non ancora pubblicate.');return
+    st.caption(f'Ultimo aggiornamento pubblicato: {updated_at}')
+    df=pd.DataFrame(records)
+    search=st.text_input('Cerca per codice, modello o descrizione',placeholder='Esempio: 87012281 oppure MU2-Y 41M')
+    if search.strip():
+        needle=search.strip().lower()
+        mask=df.astype(str).apply(lambda col: col.str.lower().str.contains(re.escape(needle),na=False)).any(axis=1)
+        df=df[mask]
+    if df.empty:
+        st.warning('Nessun prodotto trovato.');return
+    fixed=['codice','descrizione','serie','grandezza','mercato','famiglia','prezzo_listino','aggiornato_il']
+    date_cols=[c for c in df.columns if re.fullmatch(r'\d{2}/\d{2}',str(c))]
+    display_cols=[c for c in fixed if c in df.columns]+date_cols
+    renamed={'codice':'Codice','descrizione':'Descrizione','serie':'Serie','grandezza':'Grandezza','mercato':'Mercato','famiglia':'Famiglia','prezzo_listino':'Prezzo listino','aggiornato_il':'Aggiornato il'}
+    view=df[display_cols].rename(columns=renamed)
+    st.dataframe(view,use_container_width=True,hide_index=True)
+    selected_code=st.selectbox('Dettaglio prodotto',df['codice'].astype(str).tolist(),key='availability_detail')
+    row=df[df['codice'].astype(str)==selected_code].iloc[0]
+    st.subheader(f"{row.get('codice','')} · {row.get('serie','')} {row.get('grandezza','')}")
+    st.write(row.get('descrizione',''))
+    detail=[]
+    for c in date_cols:
+        try:qty=int(float(str(row.get(c,0)).replace(',','.')))
+        except Exception:qty=0
+        detail.append({'Data':c,'Disponibilità totale':qty})
+    if detail:st.dataframe(pd.DataFrame(detail),use_container_width=True,hide_index=True)
+
 def test_resend_page():
     st.title("Test notifica Resend")
     st.caption("Verifica diretta della configurazione Resend, indipendentemente dal caricamento degli ordini.")
@@ -2759,12 +2837,13 @@ with st.sidebar:
         st.session_state.user=None
         time.sleep(0.7)
         st.rerun()
-    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Ordini Clienti","Codici Ordine","Gestione listini ordini","Test notifica Resend","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
+    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Disponibilità","Ordini Clienti","Codici Ordine","Gestione listini ordini","Test notifica Resend","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Disponibilità","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
 if page=="Conferme Ordine": document_archive_page(user,"conferma");st.stop()
 if page=="DDT": document_archive_page(user,"ddt");st.stop()
+if page=="Disponibilità": availability_page(user);st.stop()
 if page=="Invia Ordine": send_order_page(user);st.stop()
 if page=="Ordini Clienti": send_order_page(user);st.stop()
 if page=="Codici Ordine": order_codes_page();st.stop()
