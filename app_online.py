@@ -155,38 +155,21 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
 [data-testid="stSidebar"] [data-testid="stExpander"] button div{color:#1f2937!important;-webkit-text-fill-color:#1f2937!important}
 [data-testid="stSidebar"] [data-testid="stExpander"] button:hover{background:#eaf4fb!important;border-color:#087dac!important}
 
-/* Restyling compatto ispirato al riferimento MBT, senza modificare la struttura */
-html,body,[class*="css"],.stApp,.stApp *{font-family:"Aptos","Segoe UI",Arial,sans-serif!important}
-.stApp{background:#ffffff!important;color:#202124!important}
-.block-container{max-width:1500px!important;padding-top:2.1rem!important}
-[data-testid="stHeader"]{background:#087dac!important}
-[data-testid="stSidebar"]{background:#f6f6f6!important;border-right:1px solid #d6d8dc!important}
-[data-testid="stSidebar"] *{font-size:14px!important}
-[data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3{font-size:16px!important}
-[data-testid="stSidebar"] [data-testid="stExpander"]{background:#ffffff!important;border:1px solid #d5d7da!important;border-radius:4px!important;margin-bottom:6px!important}
-[data-testid="stSidebar"] [data-testid="stExpander"] summary{min-height:38px!important;padding:4px 8px!important}
-[data-testid="stSidebar"] [data-testid="stExpander"] summary *{font-size:14px!important;font-weight:650!important;color:#202124!important;-webkit-text-fill-color:#202124!important}
-[data-testid="stSidebar"] [data-testid="stExpander"] button{min-height:34px!important;padding:4px 8px!important;border-radius:3px!important;background:#ffffff!important;border:1px solid #e2e4e7!important}
-[data-testid="stSidebar"] [data-testid="stExpander"] button p,[data-testid="stSidebar"] [data-testid="stExpander"] button span,[data-testid="stSidebar"] [data-testid="stExpander"] button div{font-size:13px!important;font-weight:600!important;color:#202124!important;-webkit-text-fill-color:#202124!important}
-[data-testid="stSidebar"] [data-testid="stExpander"] button:hover{background:#eef7fb!important;border-color:#0c8cbb!important}
-[data-testid="stMain"] h1{font-size:32px!important;line-height:1.15!important;font-style:italic!important;font-weight:800!important;padding:8px 16px!important;border-radius:2px!important}
-[data-testid="stMain"] h2{font-size:22px!important;line-height:1.2!important}
-[data-testid="stMain"] h3{font-size:17px!important;line-height:1.25!important}
-[data-testid="stMain"] p,[data-testid="stMain"] label,[data-testid="stMain"] li{font-size:14px!important;line-height:1.35!important}
-[data-testid="stTabs"] button{font-size:14px!important;min-height:38px!important;padding:6px 12px!important}
-[data-testid="stDataFrame"]{font-size:13px!important}
-[data-testid="stMetricValue"]{font-size:24px!important}
-.stButton>button{font-size:14px!important;min-height:36px!important;padding:5px 12px!important;border-radius:4px!important}
-.stTextInput input,.stTextArea textarea,.stNumberInput input{font-size:14px!important;min-height:38px!important}
-/* Accento verde lime leggero come nel riferimento, solo per bordi/separatori */
-[data-testid="stDataFrame"], [data-testid="stTable"]{border-color:#cbe83a!important}
-hr{border-color:#cbe83a!important}
+/* Restyling prudente e circoscritto: non altera layout, componenti o icone */
+[data-testid="stMain"] h1{font-size:34px!important;line-height:1.15!important}
+[data-testid="stMain"] h2{font-size:24px!important;line-height:1.2!important}
+[data-testid="stMain"] h3{font-size:19px!important;line-height:1.25!important}
+[data-testid="stMain"] p,[data-testid="stMain"] label,[data-testid="stMain"] li{font-size:15px!important;line-height:1.4!important}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary p{font-size:15px!important;font-weight:700!important}
+[data-testid="stSidebar"] [data-testid="stExpander"] button p{font-size:14px!important;font-weight:650!important}
+[data-testid="stTabs"] button p{font-size:14px!important}
+.stButton>button p{font-size:14px!important}
+.stTextInput input,.stTextArea textarea,.stNumberInput input{font-size:14px!important}
 @media (max-width:768px){
-  [data-testid="stMain"] h1{font-size:25px!important;padding:7px 10px!important}
-  [data-testid="stMain"] h2{font-size:19px!important}
-  [data-testid="stMain"] h3{font-size:16px!important}
-  [data-testid="stMain"] p,[data-testid="stMain"] label,[data-testid="stMain"] li{font-size:13px!important}
-  [data-testid="stSidebar"] *{font-size:13px!important}
+  [data-testid="stMain"] h1{font-size:27px!important}
+  [data-testid="stMain"] h2{font-size:21px!important}
+  [data-testid="stMain"] h3{font-size:17px!important}
+  [data-testid="stMain"] p,[data-testid="stMain"] label,[data-testid="stMain"] li{font-size:14px!important}
 }
 </style>""", unsafe_allow_html=True)
 
