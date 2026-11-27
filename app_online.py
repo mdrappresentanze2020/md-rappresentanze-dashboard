@@ -2833,7 +2833,6 @@ def availability_page(user):
 
 def commercial_agreements_hub(user):
     st.title("Accordi commerciali")
-    st.caption("Seleziona l’accordo da consultare.")
     agreements={
         "Promo EDGE e AQUA":("addendum","promo"),
         "EDGE EVO 2.0":("addendum","evo"),
@@ -2842,13 +2841,15 @@ def commercial_agreements_hub(user):
         "NATIVE 2":("native",None),
         "Accordo Commerciale 2027":("commercial",None),
     }
-    choice=st.selectbox("Accordo",list(agreements.keys()),key="commercial_agreement_choice")
+    choice=st.session_state.get("sidebar_agreement_choice","Promo EDGE e AQUA")
+    if choice not in agreements:choice="Promo EDGE e AQUA"
     kind,section=agreements[choice]
     if kind=="addendum":addendum_page(user,section)
     elif kind=="superpre":superpre_page(user)
     elif kind=="bilico":bilico_page(user)
     elif kind=="native":native_page(user)
     else:commercial_agreement_page(user)
+
 
 def test_resend_page():
     st.title("Test notifica Resend")
@@ -2959,19 +2960,35 @@ with st.sidebar:
         time.sleep(0.7)
         st.rerun()
     if user.get("role")=="admin":
-        pages=[
-            "Dashboard","Fatturato Prodotti (quantità)","Riepilogo vantaggi",
-            "Disponibilità","Ordini Clienti","Codici Ordine","Conferme Ordine","DDT",
-            "Gestione clienti","Target annuali","Gestione listini ordini","Aggiorna dati",
-            "Accordi commerciali",
-            "Stato sincronizzazione Clivet","Gestione PDF conferme","Test notifica Resend",
-        ]
+        menu_groups={
+            "Principale":["Dashboard","Fatturato Prodotti (quantità)","Riepilogo vantaggi"],
+            "Ordini e logistica":["Disponibilità","Ordini Clienti","Codici Ordine","Conferme Ordine","DDT"],
+            "Gestione":["Gestione clienti","Target annuali","Gestione listini ordini","Aggiorna dati"],
+            "Accordi commerciali":["Accordi commerciali"],
+            "Amministrazione / Sistema":["Stato sincronizzazione Clivet","Gestione PDF conferme","Test notifica Resend"],
+        }
     else:
-        pages=[
-            "Dashboard","Fatturato Prodotti (quantità)","Riepilogo vantaggi",
-            "Disponibilità","Conferme Ordine","DDT","Invia Ordine","Accordi commerciali",
-        ]
-    page=st.radio("Sezione",pages)
+        menu_groups={
+            "Principale":["Dashboard","Fatturato Prodotti (quantità)","Riepilogo vantaggi"],
+            "Ordini e logistica":["Disponibilità","Conferme Ordine","DDT","Invia Ordine"],
+            "Accordi commerciali":["Accordi commerciali"],
+        }
+    menu_group=st.selectbox("Menu",list(menu_groups.keys()),key="sidebar_menu_group")
+    if menu_group=="Accordi commerciali":
+        with st.expander("Scegli accordo commerciale",expanded=True):
+            agreement_options=[
+                "Promo EDGE e AQUA","EDGE EVO 2.0","Super Pre Split e Aqua F",
+                "Sconto Bilico 2027","NATIVE 2","Accordo Commerciale 2027",
+            ]
+            st.radio(
+                "Accordo",
+                agreement_options,
+                key="sidebar_agreement_choice",
+                label_visibility="collapsed",
+            )
+        page="Accordi commerciali"
+    else:
+        page=st.selectbox("Sezione",menu_groups[menu_group],key=f"sidebar_menu_page_{menu_group}")
 
 if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
 if page=="Conferme Ordine": document_archive_page(user,"conferma");st.stop()
