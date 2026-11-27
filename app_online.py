@@ -2726,10 +2726,60 @@ def send_availability_request_email(user,product,requested_qty,requested_date,no
         return False,f"Resend HTTP {exc.code}: {detail}"
     except Exception as exc:return False,f"{type(exc).__name__}: {exc}"
 
+
+def ensure_clivet_sync_status_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS clivet_sync_status(
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'never',
+                message TEXT,
+                products_count INTEGER DEFAULT 0,
+                started_at TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                alert_sent BOOLEAN DEFAULT FALSE)"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def load_clivet_sync_status():
+    ensure_clivet_sync_status_table()
+    def operation(connection):
+        with connection.session as session:
+            row=session.execute(text("SELECT status,message,products_count,started_at,updated_at,alert_sent FROM clivet_sync_status WHERE id=1")).mappings().first()
+            return dict(row) if row else {'status':'never','message':'Nessuna sincronizzazione registrata.','products_count':0,'started_at':None,'updated_at':None,'alert_sent':False}
+    return run_db_with_retry(operation)
+
+def clivet_sync_admin_page():
+    st.title('Stato sincronizzazione Clivet')
+    status=load_clivet_sync_status()
+    state=str(status.get('status') or 'never')
+    if state=='success':
+        st.success('Sincronizzazione Clivet completata correttamente.')
+    elif state=='login_required':
+        st.error('Sessione Clivet scaduta. Apri Clivet World sul PC, effettua accesso e OTP, quindi riavvia la sincronizzazione V6.')
+    elif state=='running':
+        st.info('Sincronizzazione Clivet in corso sul PC locale.')
+    elif state=='error':
+        st.error('Ultima sincronizzazione non completata.')
+    else:
+        st.warning('Nessuna sincronizzazione Clivet registrata.')
+    c1,c2=st.columns(2)
+    c1.metric('Prodotti pubblicati',int(status.get('products_count') or 0))
+    c2.metric('Stato',state.replace('_',' ').upper())
+    st.write(f"**Ultimo aggiornamento stato:** {status.get('updated_at') or 'Non disponibile'}")
+    if status.get('started_at'):st.write(f"**Avvio sincronizzazione:** {status.get('started_at')}")
+    if status.get('message'):st.caption(str(status.get('message')))
+    st.markdown('L’accesso e l’OTP devono essere inseriti esclusivamente nel browser locale Clivet. Le credenziali non vengono gestite dalla dashboard.')
+
 def availability_page(user):
     st.title('Verifica disponibilità')
     is_admin=user.get('role')=='admin'
     if is_admin:
+        sync_status=load_clivet_sync_status()
+        if sync_status.get('status')=='login_required':
+            st.error('Accesso Clivet richiesto sul PC locale. Le disponibilità pubblicate restano consultabili ma potrebbero non essere aggiornate.')
+        elif sync_status.get('status')=='error':
+            st.warning(f"Ultimo aggiornamento Clivet non completato: {sync_status.get('message') or 'errore non specificato'}")
         st.caption('Le disponibilità vengono aggiornate dal sincronizzatore locale Clivet. Non è necessario caricare file CSV.')
     records,updated_at=load_availability_data()
     if not records:
@@ -2903,7 +2953,7 @@ with st.sidebar:
         st.session_state.user=None
         time.sleep(0.7)
         st.rerun()
-    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Disponibilità","Ordini Clienti","Codici Ordine","Gestione listini ordini","Test notifica Resend","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Disponibilità","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
+    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Disponibilità","Ordini Clienti","Codici Ordine","Gestione listini ordini","Test notifica Resend","Stato sincronizzazione Clivet","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Disponibilità","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
@@ -2915,6 +2965,7 @@ if page=="Ordini Clienti": send_order_page(user);st.stop()
 if page=="Codici Ordine": order_codes_page();st.stop()
 if page=="Gestione listini ordini": price_lists_admin_page();st.stop()
 if page=="Test notifica Resend": test_resend_page();st.stop()
+if page=="Stato sincronizzazione Clivet": clivet_sync_admin_page();st.stop()
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
