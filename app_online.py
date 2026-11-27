@@ -2518,7 +2518,7 @@ def send_new_order_resend(customer_code,catalog,reference,notes,filename):
         request=urllib.request.Request(
             "https://api.resend.com/emails",
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"},
+            headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json","User-Agent":"MD-Rappresentanze-Dashboard/1.0"},
             method="POST",
         )
         with urllib.request.urlopen(request,timeout=25) as response:
