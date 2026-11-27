@@ -3000,7 +3000,7 @@ with st.sidebar:
     st.markdown("**Menu**")
     page=None
     for group_name,group_pages in menu_groups.items():
-        with st.expander(group_name,expanded=(group_name=="Principale")):
+        with st.expander(group_name,expanded=False):
             if group_name=="Accordi commerciali":
                 agreement_options=[
                     "Promo EDGE e AQUA","EDGE EVO 2.0","Super Pre Split e Aqua F",
