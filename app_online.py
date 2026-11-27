@@ -2651,6 +2651,23 @@ def order_codes_page():
         st.download_button('Scarica CSV',csv_bytes,file_name=f"codici_ordine_{selected['id']}.csv",mime='text/csv',type='primary',use_container_width=True)
     with st.expander('Anteprima PDF ordine'): pdf_image_preview(bytes(selected['content']),'ordine_codici')
 
+def test_resend_page():
+    st.title("Test notifica Resend")
+    st.caption("Verifica diretta della configurazione Resend, indipendentemente dal caricamento degli ordini.")
+    settings=st.secrets.get("resend",{})
+    api_present=bool(str(settings.get("api_key","")).strip())
+    recipient=str(settings.get("recipient","mdrappresentanze2020@gmail.com")).strip()
+    sender=str(settings.get("sender","MD Rappresentanze <onboarding@resend.dev>")).strip()
+    st.write(f"API key configurata: **{'Sì' if api_present else 'No'}**")
+    st.write(f"Destinatario: **{recipient or 'Non configurato'}**")
+    st.write(f"Mittente: **{sender}**")
+    if st.button("Invia email di prova Resend",type="primary",use_container_width=True):
+        sent,result=send_new_order_resend("TEST","TEST RESEND","Test manuale Resend","Invio avviato dalla sezione Admin","test_resend.pdf")
+        if sent:
+            st.success(f"Email di prova accettata da Resend. ID: {result}")
+        else:
+            st.error(f"Invio non riuscito: {result}")
+
 def targets_page():
     st.title("Target annuali")
     st.caption("I valori vengono salvati su Neon e restano invariati finché non vengono modificati dall'amministratore.")
@@ -2742,7 +2759,7 @@ with st.sidebar:
         st.session_state.user=None
         time.sleep(0.7)
         st.rerun()
-    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Ordini Clienti","Codici Ordine","Gestione listini ordini","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
+    pages=["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Ordini Clienti","Codici Ordine","Gestione listini ordini","Test notifica Resend","Riepilogo vantaggi","Aggiorna dati","Gestione clienti","Target annuali","Gestione PDF conferme","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"] if user.get("role")=="admin" else ["Dashboard","Fatturato Prodotti (quantità)","Conferme Ordine","DDT","Invia Ordine","Riepilogo vantaggi","Accordi Addendum · Promo EDGE e AQUA","Accordi Addendum · EDGE EVO 2.0","Accordi Addendum · Super Pre Split e Aqua F","Accordi Addendum · Sconto Bilico 2027","Accordi Addendum · NATIVE 2","Accordi Addendum · Accordo Commerciale 2027"]
     page=st.radio("Sezione",pages)
 
 if page=="Fatturato Prodotti (quantità)": product_turnover_page(user);st.stop()
@@ -2752,6 +2769,7 @@ if page=="Invia Ordine": send_order_page(user);st.stop()
 if page=="Ordini Clienti": send_order_page(user);st.stop()
 if page=="Codici Ordine": order_codes_page();st.stop()
 if page=="Gestione listini ordini": price_lists_admin_page();st.stop()
+if page=="Test notifica Resend": test_resend_page();st.stop()
 if page=="Aggiorna dati": upload_page();st.stop()
 if page=="Gestione clienti": client_management();st.stop()
 if page=="Target annuali": targets_page();st.stop()
