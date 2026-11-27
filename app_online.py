@@ -257,6 +257,36 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
   font-weight:600!important;
   text-align:left!important;
 }
+
+/* Target esatto di Aggiorna ed Esci tramite le key Streamlit */
+div[class*="st-key-refresh_dashboard"] button,
+div[class*="st-key-logout_dashboard"] button{
+  background:transparent!important;
+  background-color:transparent!important;
+  border:0!important;
+  outline:0!important;
+  box-shadow:none!important;
+  border-radius:0!important;
+  color:#111111!important;
+  min-height:30px!important;
+  height:auto!important;
+  padding:4px 2px!important;
+  justify-content:flex-start!important;
+}
+div[class*="st-key-refresh_dashboard"] button:hover,
+div[class*="st-key-logout_dashboard"] button:hover{background:#e9e9e9!important;background-color:#e9e9e9!important}
+div[class*="st-key-refresh_dashboard"] button p,
+div[class*="st-key-refresh_dashboard"] button span,
+div[class*="st-key-refresh_dashboard"] button div,
+div[class*="st-key-logout_dashboard"] button p,
+div[class*="st-key-logout_dashboard"] button span,
+div[class*="st-key-logout_dashboard"] button div{
+  color:#111111!important;
+  -webkit-text-fill-color:#111111!important;
+  font-size:13px!important;
+  font-weight:600!important;
+  text-align:left!important;
+}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
@@ -3081,7 +3111,7 @@ with st.sidebar:
     st.write(f"Utente: **{user['username']}**")
     if st.button("Aggiorna", type="primary", use_container_width=True, key="refresh_dashboard"):
         st.rerun()
-    if st.button("Esci"):
+    if st.button("Esci", key="logout_dashboard"):
         delete_browser_cookie(SESSION_COOKIE_NAME)
         st.session_state.user=None
         time.sleep(0.7)
