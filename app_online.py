@@ -2688,6 +2688,55 @@ def load_availability_data():
             return json.loads(row['payload_json']),row['updated_at']
     return run_db_with_retry(operation)
 
+def ensure_clivet_sync_status_table():
+    def operation(connection):
+        with connection.session as session:
+            session.execute(text("""CREATE TABLE IF NOT EXISTS clivet_sync_status(
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'never',
+                message TEXT,
+                products_count INTEGER DEFAULT 0,
+                started_at TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                alert_sent BOOLEAN DEFAULT FALSE)"""))
+            session.commit()
+    return run_db_with_retry(operation)
+
+def load_clivet_sync_status():
+    ensure_clivet_sync_status_table()
+    def operation(connection):
+        with connection.session as session:
+            row=session.execute(text("SELECT status,message,products_count,started_at,updated_at,alert_sent FROM clivet_sync_status WHERE id=1")).mappings().first()
+            if row:
+                return dict(row)
+            return {'status':'never','message':'Nessuna sincronizzazione registrata.','products_count':0,'started_at':None,'updated_at':None,'alert_sent':False}
+    return run_db_with_retry(operation)
+
+def clivet_sync_admin_page():
+    st.title('Stato sincronizzazione Clivet')
+    status=load_clivet_sync_status()
+    state=str(status.get('status') or 'never')
+    if state=='success':
+        st.success('Sincronizzazione Clivet completata correttamente.')
+    elif state=='login_required':
+        st.error('Sessione Clivet scaduta. Effettua accesso e OTP sul PC locale, quindi riavvia la sincronizzazione.')
+    elif state=='running':
+        st.info('Sincronizzazione Clivet in corso sul PC locale.')
+    elif state=='error':
+        st.error('Ultima sincronizzazione Clivet non completata.')
+    else:
+        st.warning('Nessuna sincronizzazione Clivet registrata.')
+    c1,c2=st.columns(2)
+    c1.metric('Prodotti pubblicati',int(status.get('products_count') or 0))
+    c2.metric('Stato',state.replace('_',' ').upper())
+    st.write(f"**Ultimo aggiornamento stato:** {status.get('updated_at') or 'Non disponibile'}")
+    if status.get('started_at'):
+        st.write(f"**Avvio sincronizzazione:** {status.get('started_at')}")
+    if status.get('message'):
+        with st.expander('Dettaglio ultimo messaggio',expanded=False):
+            st.code(str(status.get('message')),language='text')
+    st.caption('Login e OTP devono essere inseriti esclusivamente nel browser locale Clivet.')
+
 def send_booking_cart_email(user,items,notes):
     settings=st.secrets.get("resend",{})
     api_key=str(settings.get("api_key","")).strip()
