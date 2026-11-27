@@ -18,6 +18,17 @@ from pypdf import PdfReader
 import fitz
 from sqlalchemy import text
 
+def light_table(df):
+    """Forza colori chiari direttamente nel renderer Pandas/Streamlit."""
+    if not isinstance(df, pd.DataFrame):
+        df=pd.DataFrame(df)
+    return (df.style
+        .set_properties(**{"background-color":"#f7f7f7","color":"#111111","border-color":"#dddddd"})
+        .set_table_styles([
+            {"selector":"th","props":[("background-color","#ededed"),("color","#111111"),("font-weight","700"),("border-color","#d8d8d8")]},
+            {"selector":"td","props":[("background-color","#f7f7f7"),("color","#111111"),("border-color","#dddddd")]},
+        ]))
+
 st.set_page_config(page_title="MD Rappresentanze | Clienti", page_icon="📊", layout="wide")
 st.markdown("""<style>
 html,body,[class*="css"],.stApp,.stApp *{font-family:"Aptos Display","Aptos","Segoe UI",Arial,sans-serif!important}
@@ -671,7 +682,7 @@ def product_turnover_page(user):
                     preview_rows.append({"File":uploaded.name,"Cliente":CLIENTS[detected]["name"],"Codice":detected,"Righe":len(parsed_upload),"Fatturato":euro(parsed_upload["Fatturato"].sum()),"Quantità":f"{parsed_upload['Quantità'].sum():,.0f}".replace(",",".")})
                 except Exception as exc:
                     preview_rows.append({"File":uploaded.name,"Cliente":"-","Codice":"-","Righe":"-","Fatturato":"-","Quantità":f"ERRORE: {exc}"})
-            st.dataframe(pd.DataFrame(preview_rows),use_container_width=True,hide_index=True)
+            st.dataframe(light_table(pd.DataFrame(preview_rows)),use_container_width=True,hide_index=True)
             if valid_uploads and st.button("Pubblica tutti i file Fatturato Prodotti",type="primary",use_container_width=True):
                 saved_count=0; errors=[]
                 for uploaded,detected,parsed_upload in valid_uploads:
@@ -689,7 +700,7 @@ def product_turnover_page(user):
         for code,info in CLIENTS.items():
             rec=status.get(code)
             status_rows.append({"Cliente":info["name"],"Codice":code,"File":rec["filename"] if rec else "Non caricato","Ultimo aggiornamento":str(rec["updated_at"]) if rec else "-"})
-        st.dataframe(pd.DataFrame(status_rows),use_container_width=True,hide_index=True)
+        st.dataframe(light_table(pd.DataFrame(status_rows)),use_container_width=True,hide_index=True)
         selected_view=st.selectbox("Anteprima cliente",list(labels.keys()),key="product_turnover_preview")
         code=labels[selected_view]
     else:
@@ -719,7 +730,7 @@ def product_turnover_page(user):
     fam=fam.sort_values("Fatturato",ascending=False)
     fam_display=fam.copy(); fam_display["Fatturato"]=fam_display["Fatturato"].map(euro); fam_display["Quantità"]=fam_display["Quantità"].map(lambda x:f"{x:,.0f}".replace(",","."))
     st.subheader("Riepilogo per famiglia prodotto")
-    st.dataframe(fam_display,use_container_width=True,hide_index=True)
+    st.dataframe(light_table(fam_display),use_container_width=True,hide_index=True)
     st.subheader("Dettaglio prodotti")
     family_options=sorted(filtered["Famiglia Prodotto"].dropna().unique().tolist())
     selected_family=st.selectbox("Famiglia Prodotto",["Tutte"]+family_options,key=f"pt_family_{code}")
@@ -727,7 +738,7 @@ def product_turnover_page(user):
     detail=detail.groupby(["Catalogo","Famiglia Prodotto","Serie","Grandezza"],as_index=False).agg(Fatturato=("Fatturato","sum"),Quantità=("Quantità","sum"))
     detail=detail.sort_values(["Famiglia Prodotto","Serie","Grandezza"])
     detail_display=detail.copy(); detail_display["Fatturato"]=detail_display["Fatturato"].map(euro); detail_display["Quantità"]=detail_display["Quantità"].map(lambda x:f"{x:,.0f}".replace(",","."))
-    st.dataframe(detail_display,use_container_width=True,hide_index=True)
+    st.dataframe(light_table(detail_display),use_container_width=True,hide_index=True)
 
 def ensure_addendum_table():
     def operation(connection):
@@ -965,7 +976,7 @@ def dashboard(data, code, name):
     st.subheader("Riepilogo cataloghi")
     summary = catalogs[["Catalogo","Spedito Q1","Spedito Q2","Spedito Q3","Spedito Q4","Spedito Totale","Da Spedire Q1","Da Spedire Q2","Da Spedire Q3","Da Spedire Q4","Da Spedire Totale","Totale Complessivo"]].copy()
     for col in summary.columns[1:]: summary[col] = summary[col].map(euro)
-    st.dataframe(summary, use_container_width=True, hide_index=True)
+    st.dataframe(light_table(summary), use_container_width=True, hide_index=True)
 
     st.subheader("Prodotti e conferme ordine")
     orders = data[data["Livello"] == "order"].copy()
@@ -1122,7 +1133,7 @@ def dashboard(data, code, name):
             range_display = range_summary.copy()
             for col in ["Spedito","Da Spedire","Totale"]:
                 range_display[col] = range_display[col].map(euro)
-            st.dataframe(range_display, use_container_width=True, hide_index=True)
+            st.dataframe(light_table(range_display), use_container_width=True, hide_index=True)
 
         st.markdown('<div class="quarter-detail-title">Dettaglio trimestrale della conferma</div>',unsafe_allow_html=True)
         quarter_table = pd.DataFrame({
@@ -1135,7 +1146,7 @@ def dashboard(data, code, name):
         })
         for col in ["Q1","Q2","Q3","Q4","Totale"]:
             quarter_table[col] = quarter_table[col].map(euro)
-        st.dataframe(quarter_table, use_container_width=True, hide_index=True)
+        st.dataframe(light_table(quarter_table), use_container_width=True, hide_index=True)
 
 def admin_dashboard():
     st.title("Cruscotto generale MD Rappresentanze")
@@ -1196,7 +1207,7 @@ def admin_dashboard():
     table = overview.copy()
     for col in ["Spedito", "Da Spedire", "Totale"]:
         table[col] = table[col].map(euro)
-    st.dataframe(table, use_container_width=True, hide_index=True)
+    st.dataframe(light_table(table), use_container_width=True, hide_index=True)
 
     available = [r for r in rows if r["Stato"] == "Dati caricati"]
     if available:
@@ -1528,7 +1539,7 @@ def order_pdfs_page():
         status_df=pd.DataFrame(rows)
         status_df["Cliente"]=status_df["customer_code"].map(lambda c: CLIENTS.get(c,{}).get("name",c))
         status_df=status_df[["Cliente","order_number","filename","updated_at"]].rename(columns={"order_number":"Numero Ordine","filename":"File","updated_at":"Aggiornato"})
-        st.dataframe(status_df,use_container_width=True,hide_index=True)
+        st.dataframe(light_table(status_df),use_container_width=True,hide_index=True)
     else:
         st.info("Nessun PDF caricato.")
 def ensure_commercial_agreement_table():
@@ -1634,7 +1645,7 @@ def commercial_agreement_page(user):
         target_value=baseline*threshold
         reached=baseline>0 and current_year>=target_value
         rows.append({"Obiettivo vs 2026":f"{threshold*100:.0f}%","Target":euro(target_value),"Premio":f"{rate*100:.0f}%","Stato":"Raggiunto" if reached else "Da raggiungere","Valore premio sul fatturato attuale":euro(current_year*rate if reached and min_turnover_ok else 0)})
-    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    st.dataframe(light_table(pd.DataFrame(rows)),use_container_width=True,hide_index=True)
     p1,p2,p3=st.columns(3)
     p1.metric("Premio annuale maturato",euro(annual_prize),delta=f"{achieved_rate*100:.0f}%" if achieved_rate else "0%")
     p2.metric("Premio Q1 maturato",euro(q1_prize))
@@ -1713,7 +1724,7 @@ def native_page(user):
         net_after_extra=net*(1-extra_discount/100)
         line=qty*net_after_extra;total+=line
         rows.append({"Taglia":size,"Quantità":qty,"Prezzo netto":euro(net),"Extra sconto":f"{extra_discount:.2f}%".replace(".",","),"Prezzo netto scontato":euro(net_after_extra),"Totale":euro(line)})
-    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    st.dataframe(light_table(pd.DataFrame(rows)),use_container_width=True,hide_index=True)
     c1,c2,c3=st.columns(3)
     c1.metric("Subtotale NATIVE 2",euro(subtotal))
     c2.metric("Extra sconto",euro(subtotal-total),delta=f"{extra_discount:.2f}%".replace(".",","))
@@ -1813,7 +1824,7 @@ def bilico_page(user):
         extra_value=subtotal*(extra/100)
         final=max(subtotal-extra_value,0);grand_total+=final
         st.subheader(info["title"])
-        st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+        st.dataframe(light_table(pd.DataFrame(rows)),use_container_width=True,hide_index=True)
         c1,c2,c3=st.columns(3)
         c1.metric("Subtotale",euro(subtotal))
         c2.metric("Extra sconto",euro(extra_value),delta=f"{extra:.2f}%".replace(".",","))
@@ -1911,7 +1922,7 @@ def superpre_page(user):
         premio_q2=q2*0.05 if reached else 0.0
         premio=premio_q1+premio_q2; total_premio+=premio
         rows.append({"Famiglia":label,"Target H1 fisso":euro(target),"Fatto Q1 attuale":euro(actuals[family]["q1"]),"Fatto Q2 fino ad oggi":euro(actuals[family]["q2"]),"Programmazione Q1":euro(q1),"Programmazione Q2":euro(q2),"Programmazione totale":euro(programmed),"Target raggiunto":"Sì" if reached else "No","Premio Q1 10%":euro(premio_q1),"Premio Q2 5%":euro(premio_q2),"Premio totale":euro(premio)})
-    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    st.dataframe(light_table(pd.DataFrame(rows)),use_container_width=True,hide_index=True)
     st.metric("Premio Super Pre complessivo stimato",euro(total_premio))
     st.caption("I target SPLIT e AQUA F sono distinti. Il target può essere raggiunto interamente nel Q1, interamente nel Q2 oppure sommando i due trimestri. Il premio è pari al 10% della quota programmata nel Q1 e al 5% della quota programmata nel Q2, purché il relativo target sia raggiunto.")
 
@@ -2063,7 +2074,7 @@ def addendum_page(user, section):
         m2.metric("Totale ordine",euro(order_total))
         m3.metric("Valore omaggio automatico",euro(gift_value),delta=f"{gifts} omaggi")
         m4.metric("Totale scontato",euro(discounted))
-        st.dataframe(pd.DataFrame(display),use_container_width=True,hide_index=True)
+        st.dataframe(light_table(pd.DataFrame(display)),use_container_width=True,hide_index=True)
         return discounted
 
     if section=="promo":
@@ -2239,7 +2250,7 @@ def addendum_page(user, section):
             net=base*(1-base_discount/100)*(1-current_discount/100)
             subtotal+=qty*base; total+=qty*net
             rows.append({"Modello":label.replace("EDGE EVO 2.0 · ",""),"Quantità":qty,"Netto Addendum":euro(base),"Sconto":f"{base_discount:.2f}%".replace(".",","),"Sconto quantità":f"{current_discount:.0f}%","Prezzo netto":euro(net),"Totale":euro(qty*net)})
-        st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+        st.dataframe(light_table(pd.DataFrame(rows)),use_container_width=True,hide_index=True)
         m1,m2,m3=st.columns(3)
         m1.metric("Subtotale",euro(subtotal))
         m2.metric("Sconto quantità automatico",f"{current_discount:.0f}%")
@@ -2481,7 +2492,7 @@ def benefits_summary_page(user):
             compact=section_df[["Prodotto","Quantità","Listino","Extra sconto","Sconto quantità","Beneficio omaggio / pz","Netto effettivo / pz","Super Pre Q1 10%","Premio Q1 3%","Premio fine anno","Netto finale se Q1","Super Pre Q2 5%","Netto finale se Q2","Totale se Q1","Totale se Q2"]]
         if not show_extra and "Extra sconto" in compact.columns:
             compact=compact.drop(columns=["Extra sconto"])
-        st.dataframe(compact,use_container_width=True,hide_index=True)
+        st.dataframe(light_table(compact),use_container_width=True,hide_index=True)
 
     st.subheader("Riepilogo complessivo")
     r1,r2,r3=st.columns(3)
@@ -2511,7 +2522,7 @@ def benefits_summary_page(user):
         prize_rows.append({"Premio":"Accordo commerciale annuale","Target":euro(target_annual),"Programmazione":"Scenario selezionato","Percentuale media":f"{annual_rate*100:.2f}%".replace(".",","),"Valore al raggiungimento":euro(annual_value),"Stato":"Simulazione"})
         prize_rows.append({"Premio":"Accordo commerciale Q1","Target":euro(baseline_q1),"Programmazione":"Scenario selezionato","Percentuale media":f"{q1_rate*100:.2f}%".replace(".",","),"Valore al raggiungimento":euro(q1_value),"Stato":"Incluso" if include_q1 else "Escluso"})
     if prize_rows:
-        st.dataframe(pd.DataFrame(prize_rows),use_container_width=True,hide_index=True)
+        st.dataframe(light_table(pd.DataFrame(prize_rows)),use_container_width=True,hide_index=True)
     st.caption("Il netto finale per prodotto è una simulazione: al netto delle promozioni prodotto, degli omaggi ripartiti e dei premi percentuali selezionati nello scenario. I premi definitivi restano soggetti alle condizioni dell'accordo commerciale.")
 
 
@@ -2793,7 +2804,7 @@ def send_order_page(user):
     orders=load_customer_pdf_orders(code)
     if orders:
         st.subheader('Storico ordini inviati')
-        st.dataframe(pd.DataFrame([{'Data':r['created_at'],'Catalogo':r.get('catalog','HOME / SPLIT'),'Riferimento':r['reference'],'File':r['filename'],'Stato':r['status']} for r in orders]),use_container_width=True,hide_index=True)
+        st.dataframe(light_table(pd.DataFrame([{'Data':r['created_at'],'Catalogo':r.get('catalog','HOME / SPLIT'),'Riferimento':r['reference'],'File':r['filename'],'Stato':r['status']} for r in orders])),use_container_width=True,hide_index=True)
         choices={f"{r['reference'] or r['filename']} · {r['created_at']}":r for r in orders}
         selected_order=choices[st.selectbox('Seleziona ordine da cancellare',list(choices.keys()),key='client_delete_order_select')]
         confirm_client=st.checkbox('Confermo di voler cancellare definitivamente questo ordine',key=f"client_delete_confirm_{selected_order['id']}")
@@ -2866,7 +2877,7 @@ def order_codes_page():
     with tab2: st.code(code_qty or 'Nessun codice inserito',language=None)
     with tab3: st.code(complete,language=None)
     with tab4:
-        st.dataframe(export_df,use_container_width=True,hide_index=True)
+        st.dataframe(light_table(export_df),use_container_width=True,hide_index=True)
         st.download_button('Scarica CSV',csv_bytes,file_name=f"codici_ordine_{selected['id']}.csv",mime='text/csv',type='primary',use_container_width=True)
     with st.expander('Anteprima PDF ordine'): pdf_image_preview(bytes(selected['content']),'ordine_codici')
 
@@ -3010,7 +3021,7 @@ def availability_page(user):
                     quantities.append((c,q))
                 available=[(d,q) for d,q in quantities if q>0];first_four=available[:4]
                 model=f"{row.get('serie','')} {row.get('grandezza','')}".strip();st.subheader(f"{row.get('codice','')} · {model}")
-                if first_four:st.dataframe(pd.DataFrame([{'Data':d,'Quantità disponibile':q} for d,q in first_four]),use_container_width=True,hide_index=True)
+                if first_four:st.dataframe(light_table(pd.DataFrame([{'Data':d,'Quantità disponibile':q} for d,q in first_four])),use_container_width=True,hide_index=True)
                 else:st.error('Prodotto non disponibile nelle date pubblicate.')
                 today=datetime.now().strftime('%d/%m');today_qty=next((q for d,q in quantities if d==today),0)
                 if today_qty>0:
