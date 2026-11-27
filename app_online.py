@@ -2688,46 +2688,105 @@ def load_availability_data():
             return json.loads(row['payload_json']),row['updated_at']
     return run_db_with_retry(operation)
 
+def send_availability_request_email(user,product,requested_qty,requested_date,notes):
+    settings=st.secrets.get("resend",{})
+    api_key=str(settings.get("api_key","")).strip()
+    recipient=str(settings.get("recipient","mdrappresentanze2020@gmail.com")).strip()
+    sender=str(settings.get("sender","MD Rappresentanze <onboarding@resend.dev>")).strip()
+    if not api_key or not recipient:
+        return False,"Configurazione Resend incompleta nei Secrets di Streamlit."
+    customer_code=str(user.get('customer_code') or user.get('code') or '').strip().upper()
+    customer_name=CLIENTS.get(customer_code,{}).get('name',customer_code or user.get('username','Cliente'))
+    code=str(product.get('codice',''))
+    model=f"{product.get('serie','')} {product.get('grandezza','')}".strip()
+    payload={
+        "from":sender,"to":[recipient],
+        "subject":f"Richiesta prenotazione materiale - {customer_name} - {code}",
+        "html":(
+            "<h2>Richiesta di prenotazione materiale</h2>"
+            f"<p><b>Cliente:</b> {customer_name}<br>"
+            f"<b>Codice cliente:</b> {customer_code or 'Non indicato'}<br>"
+            f"<b>Utente:</b> {user.get('username','')}<br>"
+            f"<b>Codice prodotto:</b> {code}<br>"
+            f"<b>Modello:</b> {model}<br>"
+            f"<b>Quantità richiesta:</b> {requested_qty}<br>"
+            f"<b>Disponibilità/data scelta:</b> {requested_date}<br>"
+            f"<b>Note:</b> {notes or 'Nessuna'}</p>"
+            "<p>La richiesta deve essere verificata e confermata prima della prenotazione definitiva.</p>"
+        )}
+    try:
+        request=urllib.request.Request("https://api.resend.com/emails",data=json.dumps(payload).encode('utf-8'),
+            headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json","User-Agent":"MD-Rappresentanze-Dashboard/1.0"},method='POST')
+        with urllib.request.urlopen(request,timeout=25) as response:
+            body=json.loads(response.read().decode('utf-8'))
+        return (True,body.get('id','')) if body.get('id') else (False,str(body))
+    except urllib.error.HTTPError as exc:
+        try:detail=exc.read().decode('utf-8')
+        except Exception:detail=str(exc)
+        return False,f"Resend HTTP {exc.code}: {detail}"
+    except Exception as exc:return False,f"{type(exc).__name__}: {exc}"
+
 def availability_page(user):
-    st.title('Disponibilità prodotti')
+    st.title('Verifica disponibilità')
     is_admin=user.get('role')=='admin'
     if is_admin:
-        with st.expander('Aggiorna disponibilità da CSV',expanded=False):
-            st.caption('Carica il file disponibilita_clivet.csv generato dal sincronizzatore locale.')
+        with st.expander('Aggiornamento riservato Admin',expanded=False):
             uploaded=st.file_uploader('File disponibilità CSV',type=['csv'],key='availability_csv_upload')
             if st.button('Pubblica disponibilità',type='primary',use_container_width=True,disabled=uploaded is None):
                 try:
                     count=save_availability_csv(uploaded.getvalue())
-                    st.success(f'Pubblicati {count} prodotti.');st.rerun()
+                    st.success(f'Aggiornate le disponibilità di {count} prodotti.');st.rerun()
                 except Exception as exc:st.error(f'Errore nel caricamento: {exc}')
     records,updated_at=load_availability_data()
     if not records:
-        st.info('Disponibilità non ancora pubblicate.');return
-    st.caption(f'Ultimo aggiornamento pubblicato: {updated_at}')
+        st.info('Disponibilità non ancora aggiornate.');return
+    st.caption(f'Dati aggiornati: {updated_at}')
+    search=st.text_input('Codice prodotto o modello',placeholder='Esempio: 87012281 oppure MU2-Y 41M')
+    if not search.strip():
+        st.info('Inserisci un codice o un modello per verificare la disponibilità.');return
     df=pd.DataFrame(records)
-    search=st.text_input('Cerca per codice, modello o descrizione',placeholder='Esempio: 87012281 oppure MU2-Y 41M')
-    if search.strip():
-        needle=search.strip().lower()
-        mask=df.astype(str).apply(lambda col: col.str.lower().str.contains(re.escape(needle),na=False)).any(axis=1)
-        df=df[mask]
-    if df.empty:
-        st.warning('Nessun prodotto trovato.');return
-    fixed=['codice','descrizione','serie','grandezza','mercato','famiglia','prezzo_listino','aggiornato_il']
+    needle=search.strip().lower()
+    searchable=df[['codice','descrizione','serie','grandezza']].astype(str)
+    mask=searchable.apply(lambda col: col.str.lower().str.contains(re.escape(needle),na=False)).any(axis=1)
+    matches=df[mask]
+    if matches.empty:
+        st.warning('Prodotto non trovato oppure non presente nell’ultimo aggiornamento.');return
+    if len(matches)>1:
+        labels={f"{r.get('codice','')} · {r.get('serie','')} {r.get('grandezza','')}":i for i,r in matches.iterrows()}
+        selected_label=st.selectbox('Seleziona il prodotto',list(labels.keys()))
+        row=matches.loc[labels[selected_label]]
+    else:row=matches.iloc[0]
     date_cols=[c for c in df.columns if re.fullmatch(r'\d{2}/\d{2}',str(c))]
-    display_cols=[c for c in fixed if c in df.columns]+date_cols
-    renamed={'codice':'Codice','descrizione':'Descrizione','serie':'Serie','grandezza':'Grandezza','mercato':'Mercato','famiglia':'Famiglia','prezzo_listino':'Prezzo listino','aggiornato_il':'Aggiornato il'}
-    view=df[display_cols].rename(columns=renamed)
-    st.dataframe(view,use_container_width=True,hide_index=True)
-    selected_code=st.selectbox('Dettaglio prodotto',df['codice'].astype(str).tolist(),key='availability_detail')
-    row=df[df['codice'].astype(str)==selected_code].iloc[0]
-    st.subheader(f"{row.get('codice','')} · {row.get('serie','')} {row.get('grandezza','')}")
-    st.write(row.get('descrizione',''))
-    detail=[]
+    quantities=[]
     for c in date_cols:
         try:qty=int(float(str(row.get(c,0)).replace(',','.')))
         except Exception:qty=0
-        detail.append({'Data':c,'Disponibilità totale':qty})
-    if detail:st.dataframe(pd.DataFrame(detail),use_container_width=True,hide_index=True)
+        quantities.append((c,qty))
+    available=[(d,q) for d,q in quantities if q>0]
+    model=f"{row.get('serie','')} {row.get('grandezza','')}".strip()
+    tab_availability,tab_request=st.tabs(['Disponibilità','Richiedi prenotazione'])
+    with tab_availability:
+        st.subheader(f"{row.get('codice','')} · {model}")
+        if available:
+            first_date,first_qty=available[0]
+            st.success(f'Disponibile: {first_qty} unità al {first_date}')
+            st.dataframe(pd.DataFrame([{'Data':d,'Quantità disponibile':q} for d,q in available]),use_container_width=True,hide_index=True)
+        else:
+            st.error('Prodotto non disponibile nelle date pubblicate.')
+    with tab_request:
+        if not available:
+            st.warning('La richiesta non può essere inviata perché il prodotto non risulta disponibile.')
+        else:
+            options=[f"{d} · {q} disponibili" for d,q in available]
+            chosen=st.selectbox('Disponibilità di riferimento',options,key=f"booking_date_{row.get('codice','')}")
+            chosen_index=options.index(chosen);chosen_date,chosen_available=available[chosen_index]
+            requested_qty=st.number_input('Quantità da richiedere',min_value=1,max_value=max(chosen_available,1),value=1,step=1,key=f"booking_qty_{row.get('codice','')}")
+            notes=st.text_area('Note per la richiesta',key=f"booking_notes_{row.get('codice','')}")
+            confirm=st.checkbox('Confermo di voler inviare una richiesta di prenotazione',key=f"booking_confirm_{row.get('codice','')}")
+            if st.button('Invia richiesta di prenotazione',type='primary',use_container_width=True,disabled=not confirm,key=f"booking_send_{row.get('codice','')}"):
+                sent,result=send_availability_request_email(user,row.to_dict(),int(requested_qty),f"{chosen_date} ({chosen_available} disponibili)",notes.strip())
+                if sent:st.success('Richiesta inviata a MD Rappresentanze. La prenotazione sarà valida solo dopo conferma.')
+                else:st.error(f'Richiesta non inviata: {result}')
 
 def test_resend_page():
     st.title("Test notifica Resend")
