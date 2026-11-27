@@ -3064,7 +3064,7 @@ def availability_page(user):
                 else:st.error('Prodotto non disponibile nelle date pubblicate.')
                 today=datetime.now().strftime('%d/%m');today_qty=next((q for d,q in quantities if d==today),0)
                 if today_qty>0:
-                    st.markdown(f'''<div style="background:#0b3529;border:1px solid #2f8067;border-radius:12px;padding:18px 20px;margin:12px 0;"><div style="color:#ffffff !important;font-size:20px;font-weight:700;">Disponibile oggi: {today_qty} unità</div></div>''',unsafe_allow_html=True)
+                    st.markdown(f'''<div style="background:#f7f7f7;border:1px solid #e2e2e2;border-radius:8px;padding:16px 18px;margin:12px 0;"><div style="color:#111111 !important;-webkit-text-fill-color:#111111 !important;font-size:16px;font-weight:700;">Disponibile oggi: {today_qty} unità</div></div>''',unsafe_allow_html=True)
                     qty=st.number_input('Quantità da aggiungere al carrello',min_value=1,max_value=today_qty,value=1,step=1,key=f"cart_qty_{row.get('codice','')}")
                     if st.button('Aggiungi al carrello prenotazioni',type='primary',use_container_width=True,key=f"cart_add_{row.get('codice','')}"):
                         code=str(row.get('codice',''));existing=st.session_state[cart_key].get(code,{});new_qty=min(today_qty,int(existing.get('quantita',0))+int(qty))
