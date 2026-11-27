@@ -394,6 +394,11 @@ div[class*="st-key-logout_dashboard"] button div{
 [data-testid="stDataFrame"]{background:#f7f7f7!important;border:1px solid #dddddd!important}
 [data-testid="stDataFrame"] canvas{background:#f7f7f7!important}
 [data-testid="stDataFrame"] [data-testid="stDataFrameResizable"]{background:#f7f7f7!important}
+
+/* Editor quantità simulata chiaro, senza canvas scuro */
+.qty-light-header{display:grid;grid-template-columns:3fr 1fr;background:#ededed;color:#111111;border:1px solid #dddddd;border-radius:6px 6px 0 0;font-weight:700;padding:10px 12px}
+.qty-light-product{background:#f7f7f7;color:#111111;border:1px solid #dddddd;border-top:0;min-height:40px;padding:9px 12px;display:flex;align-items:center}
+[data-testid="stNumberInput"] input{background:#f7f7f7!important;color:#111111!important;-webkit-text-fill-color:#111111!important;border-color:#dddddd!important}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
@@ -2440,9 +2445,18 @@ def benefits_summary_page(user):
         # EDGE F e AQUA F: quantità modificabili per singolo modello direttamente nella tabella.
         if family_key in ("EDGE F","AQUA F"):
             qty_editor=section_df[["Prodotto","Quantità"]].copy()
-            # Valori iniziali: quantità già presenti se >0, altrimenti 0.
+            # Editor personalizzato chiaro: evita il renderer canvas scuro di st.data_editor.
             qty_editor["Quantità"]=pd.to_numeric(qty_editor["Quantità"],errors="coerce").fillna(0).astype(int)
-            qty_editor=st.data_editor(qty_editor,hide_index=True,use_container_width=True,key=f"sim_qty_{code}_{family_key}",column_config={"Prodotto":st.column_config.TextColumn("Prodotto",disabled=True),"Quantità":st.column_config.NumberColumn("Quantità simulata",min_value=0,step=1,format="%d")},disabled=["Prodotto"])
+            st.markdown('<div class="qty-light-header"><span>Prodotto</span><span>Quantità simulata</span></div>',unsafe_allow_html=True)
+            edited_quantities=[]
+            for row_index,editor_row in qty_editor.reset_index(drop=True).iterrows():
+                product_col,qty_col=st.columns([3,1])
+                with product_col:
+                    st.markdown(f'<div class="qty-light-product">{editor_row["Prodotto"]}</div>',unsafe_allow_html=True)
+                with qty_col:
+                    edited_qty=st.number_input("Quantità simulata",min_value=0,value=int(editor_row["Quantità"]),step=1,key=f"sim_qty_{code}_{family_key}_{row_index}",label_visibility="collapsed")
+                edited_quantities.append(int(edited_qty))
+            qty_editor["Quantità"]=edited_quantities
             qty_map=dict(zip(qty_editor["Prodotto"],qty_editor["Quantità"]))
             section_df["Quantità"]=section_df["Prodotto"].map(qty_map).fillna(0).astype(int)
             total_sim_qty=int(section_df["Quantità"].sum())
