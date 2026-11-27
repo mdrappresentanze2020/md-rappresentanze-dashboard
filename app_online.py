@@ -171,6 +171,18 @@ div[data-testid="stForm"]{border:1px solid #f2b66d;border-radius:10px;padding:14
   [data-testid="stMain"] h3{font-size:17px!important}
   [data-testid="stMain"] p,[data-testid="stMain"] label,[data-testid="stMain"] li{font-size:14px!important}
 }
+
+/* Tabelle chiare: fondo grigio leggero e testo nero */
+[data-testid="stDataFrame"]{background:#f4f5f6!important;color:#111111!important;border:1px solid #d6d9dd!important;border-radius:6px!important}
+[data-testid="stDataFrame"] *{color:#111111!important;-webkit-text-fill-color:#111111!important}
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataFrame"] [role="columnheader"] *{background:#e6e8eb!important;color:#111111!important;-webkit-text-fill-color:#111111!important;font-weight:700!important}
+[data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stDataFrame"] [role="gridcell"] *{background:#f7f7f7!important;color:#111111!important;-webkit-text-fill-color:#111111!important}
+[data-testid="stTable"] table{background:#f4f5f6!important;color:#111111!important}
+[data-testid="stTable"] th{background:#e6e8eb!important;color:#111111!important;font-weight:700!important}
+[data-testid="stTable"] td{background:#f7f7f7!important;color:#111111!important}
+[data-testid="stTable"] th *,[data-testid="stTable"] td *{color:#111111!important;-webkit-text-fill-color:#111111!important}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
