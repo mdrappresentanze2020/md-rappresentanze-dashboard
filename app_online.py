@@ -287,6 +287,63 @@ div[class*="st-key-logout_dashboard"] button div{
   font-weight:600!important;
   text-align:left!important;
 }
+
+/* Uniforma tutte le tabelle scure allo sfondo grigio chiarissimo del menu laterale */
+[data-testid="stDataFrame"],
+[data-testid="stDataFrame"] > div,
+[data-testid="stDataFrame"] [role="grid"],
+[data-testid="stDataFrame"] [role="row"],
+[data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stDataFrame"] [role="columnheader"]{
+  background:#f7f7f7!important;
+  background-color:#f7f7f7!important;
+  color:#111111!important;
+}
+[data-testid="stDataFrame"] [role="columnheader"]{
+  background:#ededed!important;
+  background-color:#ededed!important;
+  font-weight:700!important;
+}
+[data-testid="stDataFrame"] *,
+[data-testid="stTable"] *{
+  color:#111111!important;
+  -webkit-text-fill-color:#111111!important;
+}
+[data-testid="stTable"] table,
+[data-testid="stTable"] tbody,
+[data-testid="stTable"] tr,
+[data-testid="stTable"] td{
+  background:#f7f7f7!important;
+  background-color:#f7f7f7!important;
+  color:#111111!important;
+}
+[data-testid="stTable"] th{
+  background:#ededed!important;
+  background-color:#ededed!important;
+  color:#111111!important;
+  font-weight:700!important;
+}
+/* Tabelle HTML personalizzate presenti nelle varie sezioni */
+[data-testid="stMain"] table:not([class*="plotly"]){
+  background:#f7f7f7!important;
+  color:#111111!important;
+  border-color:#dddddd!important;
+}
+[data-testid="stMain"] table:not([class*="plotly"]) thead,
+[data-testid="stMain"] table:not([class*="plotly"]) th{
+  background:#ededed!important;
+  color:#111111!important;
+  -webkit-text-fill-color:#111111!important;
+  border-color:#d8d8d8!important;
+}
+[data-testid="stMain"] table:not([class*="plotly"]) tbody,
+[data-testid="stMain"] table:not([class*="plotly"]) tr,
+[data-testid="stMain"] table:not([class*="plotly"]) td{
+  background:#f7f7f7!important;
+  color:#111111!important;
+  -webkit-text-fill-color:#111111!important;
+  border-color:#dddddd!important;
+}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
