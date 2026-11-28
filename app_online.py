@@ -3121,6 +3121,7 @@ def commercial_agreements_hub(user):
     }
     choice=st.session_state.get("sidebar_agreement_choice","Promo EDGE e AQUA")
     if choice not in agreements:choice="Promo EDGE e AQUA"
+    st.caption(f"Accordo selezionato: {choice}")
     kind,section=agreements[choice]
     if kind=="addendum":addendum_page(user,section)
     elif kind=="superpre":superpre_page(user)
@@ -3260,14 +3261,11 @@ with st.sidebar:
                     "Promo EDGE e AQUA","EDGE EVO 2.0","Super Pre Split e Aqua F",
                     "Sconto Bilico 2027","NATIVE 2","Accordo Commerciale 2027",
                 ]
-                agreement=st.radio(
-                    "Accordo",
-                    agreement_options,
-                    key="sidebar_agreement_choice",
-                    label_visibility="collapsed",
-                )
-                if st.button("Apri accordo",key="open_commercial_agreement",use_container_width=True):
-                    st.session_state["sidebar_selected_page"]="Accordi commerciali"
+                for agreement_name in agreement_options:
+                    if st.button(agreement_name,key=f"open_agreement_{agreement_name}",use_container_width=True):
+                        st.session_state["sidebar_agreement_choice"]=agreement_name
+                        st.session_state["sidebar_selected_page"]="Accordi commerciali"
+                        st.rerun()
             else:
                 for item in group_pages:
                     if st.button(item,key=f"nav_{group_name}_{item}",use_container_width=True):
