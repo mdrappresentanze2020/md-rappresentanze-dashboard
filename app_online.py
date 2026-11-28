@@ -2809,6 +2809,56 @@ def delete_customer_pdf_order(order_id, customer_code=None):
             session.commit()
     return run_db_with_retry(operation)
 
+CUSTOMER_ORDER_EMAILS={
+    "M7009353":"mario@derosso.com",
+    "M7011384":"fabio@addessi.it",
+}
+CUSTOMER_ORDER_EMAILS_BY_NAME={
+    "ERRECLIMA":"a.scarsella@erreclimasrl.com",
+    "CENTRO EDILE":"daniele.sodi@degregoris.com",
+    "DE GREGORIS":"daniele.sodi@degregoris.com",
+}
+
+def customer_order_email(customer_code):
+    direct=CUSTOMER_ORDER_EMAILS.get(str(customer_code).strip().upper())
+    if direct:return direct
+    customer_name=CLIENTS.get(customer_code,{}).get("name","").strip().upper()
+    return next((email for name,email in CUSTOMER_ORDER_EMAILS_BY_NAME.items() if name in customer_name),"")
+
+def send_customer_order_receipt(customer_code,catalog,reference,filename):
+    settings=st.secrets.get("resend",{})
+    api_key=str(settings.get("api_key","")).strip()
+    sender=str(settings.get("sender","MD Rappresentanze <onboarding@resend.dev>")).strip()
+    recipient=customer_order_email(customer_code)
+    if not api_key:return False,"API key Resend assente."
+    if not recipient:return False,"Email cliente non configurata."
+    customer_name=CLIENTS.get(customer_code,{}).get("name",customer_code)
+    payload={
+        "from":sender,
+        "to":[recipient],
+        "subject":f"Ordine {reference or filename} ricevuto correttamente",
+        "html":(
+            f"<p>Gentile {customer_name},</p>"
+            "<p>confermiamo di aver ricevuto correttamente il vostro ordine.</p>"
+            f"<p><b>Riferimento ordine:</b> {reference or 'Non indicato'}<br>"
+            f"<b>Catalogo:</b> {catalog}<br>"
+            f"<b>Codice cliente:</b> {customer_code}<br>"
+            f"<b>File ricevuto:</b> {filename}</p>"
+            "<p>L’ordine sarà verificato da MD Rappresentanze prima della successiva trasmissione a Clivet.</p>"
+            "<p>Questa comunicazione conferma esclusivamente la ricezione della richiesta e non costituisce conferma d’ordine da parte di Clivet.</p>"
+            "<p>Cordiali saluti<br><b>MD Rappresentanze</b></p>"
+        )
+    }
+    try:
+        req=urllib.request.Request("https://api.resend.com/emails",data=json.dumps(payload).encode("utf-8"),headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json","User-Agent":"MD-Rappresentanze-Dashboard/1.0"},method="POST")
+        with urllib.request.urlopen(req,timeout=25) as response:
+            body=json.loads(response.read().decode("utf-8"))
+        return (True,body.get("id","")) if body.get("id") else (False,str(body))
+    except urllib.error.HTTPError as exc:
+        return False,f"HTTP {exc.code}: {exc.read().decode('utf-8','ignore')}"
+    except Exception as exc:
+        return False,f"{type(exc).__name__}: {exc}"
+
 def send_new_order_resend(customer_code,catalog,reference,notes,filename):
     settings=st.secrets.get("resend",{})
     api_key=str(settings.get("api_key","")).strip()
@@ -2884,10 +2934,16 @@ def send_order_page(user):
         else:
             save_customer_pdf_order(code,reference.strip(),notes.strip(),catalog,uploaded.name,uploaded.getvalue())
             sent,email_result=send_new_order_resend(code,catalog,reference.strip(),notes.strip(),uploaded.name)
-            if sent:
-                st.session_state['order_notification_notice']=('success','Ordine caricato correttamente. Notifica email inviata a mdrappresentanze2020@gmail.com tramite Resend.')
+            customer_sent,customer_result=send_customer_order_receipt(code,catalog,reference.strip(),uploaded.name)
+            customer_email=customer_order_email(code)
+            if sent and customer_sent:
+                st.session_state['order_notification_notice']=('success',f'Ordine caricato correttamente. Notifica interna inviata e ricevuta automatica spedita al cliente ({customer_email}).')
+            elif sent and not customer_sent:
+                st.session_state['order_notification_notice']=('warning',f'Ordine caricato e notifica interna inviata, ma la ricevuta al cliente non è partita: {customer_result}')
+            elif customer_sent:
+                st.session_state['order_notification_notice']=('warning',f'Ordine caricato e ricevuta cliente inviata a {customer_email}, ma la notifica interna non è partita: {email_result}')
             else:
-                st.session_state['order_notification_notice']=('warning',f'Ordine caricato correttamente, ma la notifica email non è partita: {email_result}')
+                st.session_state['order_notification_notice']=('warning',f'Ordine caricato, ma le email non sono partite. Notifica interna: {email_result}. Ricevuta cliente: {customer_result}')
             st.rerun()
     orders=load_customer_pdf_orders(code)
     if orders:
