@@ -399,6 +399,38 @@ div[class*="st-key-logout_dashboard"] button div{
 .qty-light-header{display:grid;grid-template-columns:3fr 1fr;background:#ededed;color:#111111;border:1px solid #dddddd;border-radius:6px 6px 0 0;font-weight:700;padding:10px 12px}
 .qty-light-product{background:#f7f7f7;color:#111111;border:1px solid #dddddd;border-top:0;min-height:40px;padding:9px 12px;display:flex;align-items:center}
 [data-testid="stNumberInput"] input{background:#f7f7f7!important;color:#111111!important;-webkit-text-fill-color:#111111!important;border-color:#dddddd!important}
+
+/* Accordi commerciali: stile piu leggero, compatto e delicato */
+[data-testid="stMetric"]{
+  background:#fbfcfd!important;
+  border:1px solid #dbe8ef!important;
+  border-left:3px solid #67b7d8!important;
+  border-radius:9px!important;
+  padding:9px 12px!important;
+  box-shadow:none!important;
+}
+[data-testid="stMetricLabel"] p{
+  color:#303840!important;
+  font-size:13px!important;
+  font-weight:600!important;
+  line-height:1.2!important;
+}
+[data-testid="stMetricValue"]{
+  color:#202124!important;
+  font-size:17px!important;
+  font-weight:500!important;
+  line-height:1.2!important;
+}
+[data-testid="stNumberInput"] label p{font-size:13px!important;font-weight:600!important;line-height:1.25!important}
+[data-testid="stNumberInput"] input{min-height:34px!important;height:34px!important;font-size:13px!important;padding-top:4px!important;padding-bottom:4px!important}
+[data-testid="stNumberInput"] button{min-height:34px!important;height:34px!important;width:34px!important}
+[data-testid="stMain"] h2{font-size:21px!important;font-weight:650!important}
+[data-testid="stMain"] h3{font-size:17px!important;font-weight:650!important}
+@media (max-width:768px){
+  [data-testid="stMetric"]{padding:8px 10px!important}
+  [data-testid="stMetricLabel"] p{font-size:12px!important}
+  [data-testid="stMetricValue"]{font-size:16px!important}
+}
 </style>""", unsafe_allow_html=True)
 
 CATEGORIES = ["Applied", "Fancoil", "Home", "Split", "VRF"]
